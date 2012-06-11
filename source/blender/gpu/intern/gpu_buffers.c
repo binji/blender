@@ -42,6 +42,7 @@
 #include "BLI_math.h"
 #include "BLI_utildefines.h"
 #include "BLI_ghash.h"
+#include "BLI_pbvh.h"
 #include "BLI_threads.h"
 
 #include "DNA_meshdata_types.h"
@@ -54,6 +55,8 @@
 #include "DNA_userdef_types.h"
 
 #include "GPU_buffers.h"
+
+#include "bmesh.h"
 
 typedef enum {
 	GPU_BUFFER_VERTEX_STATE = 1,
@@ -1311,6 +1314,8 @@ struct GPU_Buffers {
 	int totgrid;
 	int has_hidden;
 
+	int use_bmesh;
+
 	unsigned int tot_tri, tot_quad;
 
 	/* The PBVH ensures that either all faces in the node are
@@ -1838,6 +1843,226 @@ GPU_Buffers *GPU_build_grid_buffers(int *grid_indices, int totgrid,
 
 #undef FILL_QUAD_BUFFER
 
+static void gpu_bmesh_vert_buffer_add(BMVert *v, BMesh *bm,
+									  VertexBufferFormat *vert_data,
+									  int *v_index,
+									  const float fno[3],
+									  const float *fmask)
+{
+	VertexBufferFormat *vd = &vert_data[*v_index];
+	float *mask;
+
+	if (!BM_elem_flag_test(v, BM_ELEM_HIDDEN)) {
+		/* Set coord, normal, and mask */
+		copy_v3_v3(vd->co, v->co);
+		normal_float_to_short_v3(vd->no, fno ? fno : v->no);
+		mask = CustomData_bmesh_get(&bm->vdata, v->head.data, CD_PAINT_MASK);
+		gpu_color_from_mask_copy(fmask ? *fmask : *mask, vd->color);
+		
+
+		/* Assign index for use in the triangle index buffer */
+		BM_elem_index_set(v, (*v_index)); /* set_dirty! */
+
+		(*v_index)++;
+	}
+}
+
+static int gpu_bmesh_vert_visible_count(GHash *bm_unique_verts,
+										GHash *bm_other_verts)
+{
+	GHashIterator gh_iter;
+	int totvert = 0;
+
+	GHASH_ITER (gh_iter, bm_unique_verts) {
+		BMVert *v = BLI_ghashIterator_getKey(&gh_iter);
+		if (!BM_elem_flag_test(v, BM_ELEM_HIDDEN))
+			totvert++;
+	}
+	GHASH_ITER (gh_iter, bm_other_verts) {
+		BMVert *v = BLI_ghashIterator_getKey(&gh_iter);
+		if (!BM_elem_flag_test(v, BM_ELEM_HIDDEN))
+			totvert++;
+	}
+
+	return totvert;
+}
+
+static int gpu_bmesh_face_visible(BMFace *f)
+{
+	BMIter bm_iter;
+	BMVert *v;
+
+	BM_ITER_ELEM (v, &bm_iter, f, BM_VERTS_OF_FACE) {
+		if (BM_elem_flag_test(v, BM_ELEM_HIDDEN))
+			return FALSE;
+	}
+
+	return TRUE;
+}
+
+static int gpu_bmesh_face_visible_count(GHash *bm_faces)
+{
+	GHashIterator gh_iter;
+	int totface = 0;
+
+	GHASH_ITER (gh_iter, bm_faces) {
+		BMFace *f = BLI_ghashIterator_getKey(&gh_iter);
+
+		if (gpu_bmesh_face_visible(f))
+			totface++;
+	}
+
+	return totface;
+}
+
+/* Creates a vertex buffer (coordinate, normal, color) and, if smooth
+   shading, an element index buffer. */
+void GPU_update_bmesh_buffers(GPU_Buffers *buffers,
+							  BMesh *bm,
+							  GHash *bm_faces,
+							  GHash *bm_unique_verts,
+							  GHash *bm_other_verts)
+{
+	VertexBufferFormat *vert_data;
+	unsigned short *tri_data;
+	int tottri, totvert;
+
+	if (!buffers->vert_buf || (buffers->smooth && !buffers->index_buf))
+		return;
+
+	/* Count visible triangles */
+	tottri = gpu_bmesh_face_visible_count(bm_faces);
+
+	if (buffers->smooth) {
+		/* Count visible vertices */
+		totvert = gpu_bmesh_vert_visible_count(bm_unique_verts, bm_other_verts);
+	}
+	else
+		totvert = tottri * 3;
+
+	/* Initialize vertex buffer */
+	glBindBufferARB(GL_ARRAY_BUFFER_ARB, buffers->vert_buf);
+	glBufferDataARB(GL_ARRAY_BUFFER_ARB,
+					sizeof(VertexBufferFormat) * totvert,
+					NULL, GL_STATIC_DRAW_ARB);
+
+	/* Fill vertex buffer */
+	vert_data = glMapBufferARB(GL_ARRAY_BUFFER_ARB, GL_WRITE_ONLY_ARB);
+	if (vert_data) {
+		GHashIterator gh_iter;
+		int v_index = 0;
+
+		if (buffers->smooth) {
+			/* Vertices get an index assigned for use in the triangle
+			   index buffer */
+			bm->elem_index_dirty |= BM_VERT;
+
+			GHASH_ITER (gh_iter, bm_unique_verts) {
+				gpu_bmesh_vert_buffer_add(BLI_ghashIterator_getKey(&gh_iter),
+										  bm, vert_data, &v_index, NULL, NULL);
+			}
+
+			GHASH_ITER (gh_iter, bm_other_verts) {
+				gpu_bmesh_vert_buffer_add(BLI_ghashIterator_getKey(&gh_iter),
+										  bm, vert_data, &v_index, NULL, NULL);
+			}
+
+			/* XXX: need to address this still, node might gain more
+			   than this currently */
+			BLI_assert(v_index < (1 << 16));
+		}
+		else {
+			GHASH_ITER (gh_iter, bm_faces) {
+				BMFace *f = BLI_ghashIterator_getKey(&gh_iter);
+
+				BLI_assert(f->len == 3);
+
+				if (gpu_bmesh_face_visible(f)) {
+					BMVert *v[3];
+					float fmask = 0;
+					int i;
+
+					BM_iter_as_array(bm, BM_VERTS_OF_FACE, f, (void**)v, 3);
+
+					/* Average mask value */
+					for (i = 0; i < 3; i++) {
+						fmask += *((float*)CustomData_bmesh_get(&bm->vdata,
+																v[i]->head.data,
+																CD_PAINT_MASK));
+					}
+					fmask /= 3.0f;
+					
+					for (i = 0; i < 3; i++) {
+						gpu_bmesh_vert_buffer_add(v[i], bm, vert_data,
+												  &v_index, f->no, &fmask);
+					}
+				}
+			}
+
+			buffers->tot_tri = tottri;
+		}
+
+		glUnmapBufferARB(GL_ARRAY_BUFFER_ARB);
+	}
+	else {
+		/* Memory map failed */
+		glDeleteBuffersARB(1, &buffers->vert_buf);
+		buffers->vert_buf = 0;
+		return;
+	}
+
+	if (buffers->smooth) {
+		/* Initialize triangle index buffer */
+		glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, buffers->index_buf);
+		glBufferDataARB(GL_ELEMENT_ARRAY_BUFFER_ARB,
+						sizeof(unsigned short) * 3 * tottri,
+						NULL, GL_STATIC_DRAW_ARB);
+
+		/* Fill triangle index buffer */
+		tri_data = glMapBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, GL_WRITE_ONLY_ARB);
+		if (tri_data) {
+			GHashIterator gh_iter;
+
+			GHASH_ITER (gh_iter, bm_faces) {
+				BMIter bm_iter;
+				BMFace *f = BLI_ghashIterator_getKey(&gh_iter);
+				BMVert *v;
+
+				if (gpu_bmesh_face_visible(f)) {
+					BM_ITER_ELEM (v, &bm_iter, f, BM_VERTS_OF_FACE) {
+						(*tri_data) = BM_elem_index_get(v);
+						tri_data++;
+					}
+				}
+			}
+
+			glUnmapBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB);
+
+			buffers->tot_tri = tottri;
+			buffers->index_type = GL_UNSIGNED_SHORT;
+		}
+		else {
+			/* Memory map failed */
+			glDeleteBuffersARB(1, &buffers->index_buf);
+			buffers->index_buf = 0;
+		}
+	}
+}
+
+GPU_Buffers *GPU_build_bmesh_buffers(int smooth_shading)
+{
+	GPU_Buffers *buffers;
+
+	buffers = MEM_callocN(sizeof(GPU_Buffers), "GPU_Buffers");
+	if (smooth_shading)
+		glGenBuffersARB(1, &buffers->index_buf);
+	glGenBuffersARB(1, &buffers->vert_buf);
+	buffers->use_bmesh = TRUE;
+	buffers->smooth = smooth_shading;
+
+	return buffers;
+}
+
 static void gpu_draw_buffers_legacy_mesh(GPU_Buffers *buffers)
 {
 	const MVert *mvert = buffers->mvert;
@@ -1999,6 +2224,100 @@ static void gpu_draw_buffers_legacy_grids(GPU_Buffers *buffers)
 	gpu_colors_disable(VBO_DISABLED);
 }
 
+#if 0
+static void gpu_draw_buffers_legacy_bmesh(GPU_Buffers *buffers, int UNUSED(smooth))
+{
+	GHashIterator gh_iter;
+	GHash *bm_faces;
+	float min[3], max[3];
+	int test_colors = TRUE;
+
+	/* XXX: testing */
+	BLI_pbvh_node_get_BB(BLI_pbvh_node_from_index(buffers->bmesh_bvh,
+												  buffers->bmesh_node_index),
+						 min, max);
+
+	bm_faces = BLI_pbvh_bmesh_node_faces(buffers->bmesh_bvh,
+										 buffers->bmesh_node_index);
+
+	if (test_colors) {
+		/* Node coloring */
+		glEnable(GL_COLOR_MATERIAL);
+		glColorMaterial(GL_FRONT_AND_BACK, GL_DIFFUSE);
+		srand(buffers->bmesh_node_index + 1);
+		glColor3f((float)rand() / (float)RAND_MAX,
+				  (float)rand() / (float)RAND_MAX,
+				  (float)rand() / (float)RAND_MAX);
+	}
+
+	glBegin(GL_TRIANGLES);
+	GHASH_ITER (gh_iter, bm_faces) {
+		BMFace *f = BLI_ghashIterator_getKey(&gh_iter);
+
+		BLI_assert(f->len == 3);
+		if (f->len == 3) {
+			BMIter bm_iter;
+			BMVert *v;
+			//float no[3];
+
+			/* TODO */
+			//BM_face_normal_update(f);
+			//glNormal3fv(f->no);
+			
+			BM_ITER_ELEM (v, &bm_iter, f, BM_VERTS_OF_FACE) {
+				// TODO: if (smooth)
+				glNormal3fv(v->no);
+				glVertex3fv(v->co);
+			}
+		}
+	}
+	glEnd();
+
+#if 0
+	glLineWidth(3);
+	glColor3f((float)rand() / (float)RAND_MAX,
+			  (float)rand() / (float)RAND_MAX,
+			  (float)rand() / (float)RAND_MAX);
+	glBegin(GL_LINE_LOOP);
+	glVertex3f(min[0], min[1], 0.01);
+	glVertex3f(min[0], max[1], 0.01);
+	glVertex3f(max[0], max[1], 0.01);
+	glVertex3f(max[0], min[1], 0.01);
+	glEnd();
+	glLineWidth(1);
+#endif
+
+	//BLI_assert(min[0] < max[0] && min[1] < max[1]);
+
+	if (test_colors) {
+		glDisable(GL_COLOR_MATERIAL);
+	}
+#if 0
+	glDisable(GL_LIGHTING);
+	GHASH_ITER (gh_iter, bm_faces) {
+		BMFace *f = BLI_ghashIterator_getKey(&gh_iter);
+
+		BLI_assert(f->len == 3);
+		if (f->len == 3) {
+			BMIter bm_iter;
+			BMVert *v;
+			float no[3];
+
+			/* TODO */
+			//BM_face_normal_update(f);
+			glBegin(GL_LINE_LOOP);
+			BM_ITER_ELEM (v, &bm_iter, f, BM_VERTS_OF_FACE) {
+				// TODO: if (smooth)
+				//glNormal3fv(v->no);
+				glVertex3fv(v->co);
+			}
+			glEnd();
+		}
+	}
+	glEnable(GL_LIGHTING);
+#endif
+}
+#endif
 void GPU_draw_buffers(GPU_Buffers *buffers, DMSetMaterial setMaterial)
 {
 	if (buffers->totface) {
@@ -2011,6 +2330,16 @@ void GPU_draw_buffers(GPU_Buffers *buffers, DMSetMaterial setMaterial)
 		if (!setMaterial(f->mat_nr + 1, NULL))
 			return;
 	}
+	else if (buffers->use_bmesh) {
+		
+	}
+	/* TODO */
+	/*if (buffers->use_bmesh) {
+		smooth = TRUE;
+		glShadeModel(smooth ? GL_SMOOTH : GL_FLAT);
+		//gpu_draw_buffers_legacy_bmesh(buffers, smooth);
+		return;
+	}*/
 
 	glShadeModel((buffers->smooth || buffers->totface) ? GL_SMOOTH : GL_FLAT);
 
