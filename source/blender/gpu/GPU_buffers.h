@@ -47,6 +47,8 @@ struct DMFlagMat;
 struct DerivedMesh;
 struct GHash;
 struct GPUVertPointLink;
+struct MFace;
+struct MVert;
 struct PBVH;
 
 typedef struct GPUBuffer {
