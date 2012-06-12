@@ -232,6 +232,71 @@ static void partialvis_update_grids(Object *ob,
 	}
 }
 
+static void partialvis_update_bmesh(Object *UNUSED(ob),
+									PBVH *pbvh,
+									PBVHNode *node,
+									PartialVisAction action,
+									PartialVisArea area,
+									float planes[4][4])
+{
+	BMesh *bm;
+	GHash *unique;
+	GHashIterator gh_iter;
+	int any_changed = 0, any_visible = 0;
+
+	bm = BLI_pbvh_get_bmesh(pbvh);
+	unique = BLI_pbvh_bmesh_node_unique_verts(node);
+
+	/* TODO */
+	//sculpt_undo_push_node(ob, node, SCULPT_UNDO_HIDDEN);
+
+	/* TODO: deduplicate */
+	GHASH_ITER (gh_iter, unique) {
+		BMVert *v = BLI_ghashIterator_getKey(&gh_iter);
+		float *vmask = CustomData_bmesh_get(&bm->vdata,
+											v->head.data,
+											CD_PAINT_MASK);
+
+		/* hide vertex if in the hide volume */
+		if (is_effected(area, planes, v->co, *vmask)) {
+			if (action == PARTIALVIS_HIDE)
+				BM_elem_flag_enable(v, BM_ELEM_HIDDEN);
+			else
+				BM_elem_flag_disable(v, BM_ELEM_HIDDEN);
+			any_changed = 1;
+		}
+
+		if (!BM_elem_flag_test(v, BM_ELEM_HIDDEN))
+			any_visible = 1;
+	}
+
+	#if 0
+	GHASH_ITER (gh_iter, other) {
+		BMVert *v = BLI_ghashIterator_getKey(&gh_iter);
+		float *vmask = CustomData_bmesh_get(&bm->vdata,
+											v->head.data,
+											CD_PAINT_MASK);
+
+		/* hide vertex if in the hide volume */
+		if (is_effected(area, planes, v->co, *vmask)) {
+			if (action == PARTIALVIS_HIDE)
+				BM_elem_flag_enable(v, BM_ELEM_HIDDEN);
+			else
+				BM_elem_flag_disable(v, BM_ELEM_HIDDEN);
+			any_changed = 1;
+		}
+
+		if (!BM_elem_flag_test(v, BM_ELEM_HIDDEN))
+			any_visible = 1;
+	}
+	#endif
+
+	if (any_changed) {
+		BLI_pbvh_node_mark_rebuild_draw(node);
+		BLI_pbvh_node_fully_hidden_set(node, !any_visible);
+	}
+}
+
 static void rect_from_props(rcti *rect, PointerRNA *ptr)
 {
 	rect->xmin = RNA_int_get(ptr, "xmin");
@@ -329,6 +394,9 @@ static int hide_show_exec(bContext *C, wmOperator *op)
 				break;
 			case PBVH_GRIDS:
 				partialvis_update_grids(ob, pbvh, nodes[i], action, area, clip_planes);
+				break;
+			case PBVH_BMESH:
+				partialvis_update_bmesh(ob, pbvh, nodes[i], action, area, clip_planes);
 				break;
 		}
 	}
