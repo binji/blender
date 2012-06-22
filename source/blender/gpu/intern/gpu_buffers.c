@@ -2383,6 +2383,29 @@ void GPU_draw_buffers(GPU_Buffers *buffers, DMSetMaterial setMaterial)
 				glDrawElements(GL_TRIANGLES, totelem, buffers->index_type, 0);
 			else
 				glDrawArrays(GL_TRIANGLES, 0, totelem);
+
+			/* Temporary hack to draw wireframe */
+			{
+				/* Note: disabling because SCons won't build with it */
+#if 0
+				extern void bglPolygonOffset(float viewdist, float dist);
+
+				/* Set neutral color */
+				glDisableClientState(GL_COLOR_ARRAY);
+				glColor3f(0.5, 0.5, 0.5);
+
+				/* Enable wire drawing, offset to avoid z-fighting */
+				glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+				bglPolygonOffset(1, 1);
+
+				/* Redraw triangles */
+				glDrawElements(GL_TRIANGLES, buffers->tot_tri * 3, buffers->index_type, 0);
+
+				/* Reset state */
+				bglPolygonOffset(0, 0);
+				glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+#endif
+			}
 		}
 
 		glBindBufferARB(GL_ARRAY_BUFFER_ARB, 0);
