@@ -459,7 +459,8 @@ static void *image_undo_push_tile(Image *ima, ImBuf *ibuf, ImBuf **tmpibuf, int 
 	return tile->rect.pt;
 }
 
-static void image_undo_restore(bContext *C, ListBase *lb)
+static void image_undo_restore(bContext *C, ListBase *lb,
+							   PaintRestoreDirection UNUSED(direction))
 {
 	Main *bmain = CTX_data_main(C);
 	Image *ima = NULL;
