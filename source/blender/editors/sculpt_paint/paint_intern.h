@@ -162,7 +162,14 @@ typedef enum BrushStrokeMode {
 } BrushStrokeMode;
 
 /* paint_undo.c */
-typedef void (*UndoRestoreCb)(struct bContext *C, struct ListBase *lb);
+
+typedef enum {
+	PAINT_RESTORE_UNDO,
+	PAINT_RESTORE_REDO
+} PaintRestoreDirection;
+
+typedef void (*UndoRestoreCb)(struct bContext *C, struct ListBase *lb,
+							  PaintRestoreDirection direction);
 typedef void (*UndoFreeCb)(struct ListBase *lb);
 
 void undo_paint_push_begin(int type, const char *name, UndoRestoreCb restore, UndoFreeCb free);

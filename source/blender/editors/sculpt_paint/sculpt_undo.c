@@ -261,7 +261,8 @@ static int sculpt_undo_restore_mask(bContext *C, DerivedMesh *dm, SculptUndoNode
 	return 1;
 }
 
-static void sculpt_undo_restore(bContext *C, ListBase *lb)
+static void sculpt_undo_restore(bContext *C, ListBase *lb,
+								PaintRestoreDirection UNUSED(direction))
 {
 	Scene *scene = CTX_data_scene(C);
 	Sculpt *sd = CTX_data_tool_settings(C)->sculpt;

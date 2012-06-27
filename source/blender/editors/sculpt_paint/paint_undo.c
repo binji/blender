@@ -64,10 +64,11 @@ static UndoStack MeshUndoStack = {UNDO_PAINT_MESH, {NULL, NULL}, NULL};
 
 /* Generic */
 
-static void undo_restore(bContext *C, UndoStack *UNUSED(stack), UndoElem *uel)
+static void undo_restore(bContext *C, UndoStack *UNUSED(stack), UndoElem *uel,
+						 PaintRestoreDirection direction)
 {
 	if (uel && uel->restore)
-		uel->restore(C, &uel->elems);
+		uel->restore(C, &uel->elems, direction);
 }
 
 static void undo_elem_free(UndoStack *UNUSED(stack), UndoElem *uel)
@@ -158,7 +159,7 @@ static int undo_stack_step(bContext *C, UndoStack *stack, int step, const char *
 				if (G.debug & G_DEBUG_WM) {
 					printf("%s: undo '%s'\n", __func__, stack->current->name);
 				}
-				undo_restore(C, stack, stack->current);
+				undo_restore(C, stack, stack->current, PAINT_RESTORE_UNDO);
 				stack->current = stack->current->prev;
 				return 1;
 			}
@@ -169,7 +170,7 @@ static int undo_stack_step(bContext *C, UndoStack *stack, int step, const char *
 		else {
 			if (!name || strcmp(stack->current->name, name) == 0) {
 				undo = (stack->current && stack->current->next) ? stack->current->next : stack->elems.first;
-				undo_restore(C, stack, undo);
+				undo_restore(C, stack, undo, PAINT_RESTORE_REDO);
 				stack->current = undo;
 				if (G.debug & G_DEBUG_WM) {
 					printf("%s: redo %s\n", __func__, undo->name);
