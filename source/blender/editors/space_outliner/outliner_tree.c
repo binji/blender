@@ -68,6 +68,7 @@
 #include "BKE_fcurve.h"
 #include "BKE_main.h"
 #include "BKE_modifier.h"
+#include "BKE_paint.h"
 #include "BKE_sequencer.h"
 #include "BKE_tessmesh.h"
 
@@ -1579,6 +1580,8 @@ void outliner_build_tree(Main *mainvar, Scene *scene, SpaceOops *soops)
 
 			if (ob && (ob->type == OB_MESH) && me->edit_btmesh)
 				bm = me->edit_btmesh->bm;
+			else if (ob->sculpt)
+				bm = ob->sculpt->bm;
 
 			if (bm)
 				bm_log_groups_iter(bm, outliner_bm_log_groups_cb, soops);
