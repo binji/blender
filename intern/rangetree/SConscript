@@ -1,0 +1,9 @@
+2#!/usr/bin/python
+Import ('env')
+
+sources = env.Glob('*.cc')
+
+incs = '.'
+defs = ''
+
+env.BlenderLib ('bf_intern_rangetree', sources, Split(incs), Split(defs), libtype=['intern'], priority=[100] )
