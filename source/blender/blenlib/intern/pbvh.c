@@ -47,7 +47,9 @@
 
 //#define PERFCNTRS
 
-#define STACK_FIXED_DEPTH   100
+/* TODO */
+//#define STACK_FIXED_DEPTH   100
+#define STACK_FIXED_DEPTH   10000
 
 typedef struct PBVHStack {
 	PBVHNode *node;
