@@ -733,6 +733,7 @@ static float brush_strength(Sculpt *sd, StrokeCache *cache, float feather)
 			return feather;
 
 		case SCULPT_TOOL_ROTATE:
+		case SCULPT_TOOL_ERASE:
 			return alpha * pressure * feather;
 
 		default:
@@ -894,6 +895,11 @@ static int sculpt_search_sphere_cb(PBVHNode *node, void *data_v)
 	sub_v3_v3v3(t, center, nearest);
 
 	return dot_v3v3(t, t) < data->radius_squared;
+}
+
+static int sculpt_search_cylinder_cb(PBVHNode *UNUSED(node), void *UNUSED(data_v))
+{
+	return TRUE;
 }
 
 /* Handles clipping against a mirror modifier and SCULPT_LOCK axis flags */
@@ -2726,6 +2732,67 @@ static void do_scrape_brush(Sculpt *sd, Object *ob, PBVHNode **nodes, int totnod
 	}
 }
 
+static void do_erase_brush(Sculpt *sd, Object *ob, PBVHNode **nodes, int totnode)
+{
+	SculptSession *ss = ob->sculpt;
+	Brush *brush = paint_brush(&sd->paint);
+
+	float bstrength = ss->cache->bstrength;
+	const float radius = ss->cache->radius;
+
+	float l2[3];
+
+	float an[3];
+	float fc[3];
+	float offset = get_offset(sd, ss);
+
+	float displace;
+
+	int n;
+
+	float temp[3];
+
+	displace = -radius * offset;
+
+	mul_v3_v3v3(temp, an, ss->cache->scale);
+	mul_v3_fl(temp, displace);
+	add_v3_v3(fc, temp);
+
+	/* Calculate second location point further back in view */
+	add_v3_v3v3(l2, ss->cache->location, ss->cache->view_normal);
+
+	//#pragma omp parallel for schedule(guided) if (sd->flags & SCULPT_USE_OPENMP)
+	for (n = 0; n < totnode; n++) {
+		PBVHVertexIter vd;
+		float (*proxy)[3];
+
+		proxy = BLI_pbvh_node_add_proxy(ss->pbvh, nodes[n])->co;
+
+		BLI_pbvh_vertex_iter_begin(ss->pbvh, nodes[n], vd, PBVH_ITER_UNIQUE)
+		{
+			float cp[3], delta[3], dist_squared;
+
+			/* Test if point is within erase brush's cylinder */
+			closest_to_line_v3(cp, vd.co, ss->cache->location, l2);
+			sub_v3_v3v3(delta, vd.co, cp);
+			/* TODO */
+			dist_squared = len_squared_v3(delta);
+			if (dist_squared <= radius * radius) {
+				const float fade = bstrength * tex_strength(ss, brush, vd.co,
+															sqrtf(dist_squared),
+															an, vd.no, vd.fno,
+															*vd.mask);
+
+				madd_v3_v3fl(proxy[vd.i], delta, fade);
+
+				if (vd.mvert)
+					vd.mvert->flag |= ME_VERT_PBVH_UPDATE;
+			}
+		}
+		BLI_pbvh_vertex_iter_end;
+	}
+}
+
 void sculpt_vertcos_to_key(Object *ob, KeyBlock *kb, float (*vertCos)[3])
 {
 	Mesh *me = (Mesh *)ob->data;
@@ -2804,7 +2871,10 @@ static void sculpt_topology_update(Sculpt *sd, Object *ob, Brush *brush)
 	                      SCULPT_TOOL_THUMB,
 	                      SCULPT_TOOL_LAYER);
 
-	BLI_pbvh_search_gather(ss->pbvh, sculpt_search_sphere_cb, &data, &nodes, &totnode);
+	if (brush->sculpt_tool == SCULPT_TOOL_ERASE)
+		BLI_pbvh_search_gather(ss->pbvh, sculpt_search_cylinder_cb, &data, &nodes, &totnode);
+	else
+		BLI_pbvh_search_gather(ss->pbvh, sculpt_search_sphere_cb, &data, &nodes, &totnode);
 
 	/* Only act if some verts are inside the brush area */
 	if (totnode) {
@@ -2852,7 +2922,10 @@ static void do_brush_action(Sculpt *sd, Object *ob, Brush *brush)
 	                      SCULPT_TOOL_ROTATE,
 	                      SCULPT_TOOL_THUMB,
 	                      SCULPT_TOOL_LAYER);
-	BLI_pbvh_search_gather(ss->pbvh, sculpt_search_sphere_cb, &data, &nodes, &totnode);
+	if (brush->sculpt_tool == SCULPT_TOOL_ERASE)
+		BLI_pbvh_search_gather(ss->pbvh, sculpt_search_cylinder_cb, &data, &nodes, &totnode);
+	else
+		BLI_pbvh_search_gather(ss->pbvh, sculpt_search_sphere_cb, &data, &nodes, &totnode);
 
 	/* Only act if some verts are inside the brush area */
 	if (totnode) {
@@ -2925,6 +2998,9 @@ static void do_brush_action(Sculpt *sd, Object *ob, Brush *brush)
 				break;
 			case SCULPT_TOOL_MASK:
 				do_mask_brush(sd, ob, nodes, totnode);
+				break;
+			case SCULPT_TOOL_ERASE:
+				do_erase_brush(sd, ob, nodes, totnode);
 				break;
 		}
 
@@ -3333,6 +3409,8 @@ static const char *sculpt_tool_name(Sculpt *sd)
 			return "Rotate Brush";
 		case SCULPT_TOOL_MASK:
 			return "Mask Brush";
+		case SCULPT_TOOL_ERASE:
+			return "Erase Brush";
 	}
 
 	return "Sculpting";
@@ -4007,9 +4085,13 @@ static int over_mesh(bContext *C, struct wmOperator *UNUSED(op), float x, float 
 static int sculpt_stroke_test_start(bContext *C, struct wmOperator *op,
                                     const float mouse[2])
 {
+	Sculpt *sd = CTX_data_tool_settings(C)->sculpt;
+	const Brush *brush = paint_brush(&sd->paint);
+
 	/* Don't start the stroke until mouse goes over the mesh.
 	 * note: event will only be null when re-executing the saved stroke. */
-	if (over_mesh(C, op, mouse[0], mouse[1])) {
+	if (over_mesh(C, op, mouse[0], mouse[1]) ^
+		(brush->sculpt_tool == SCULPT_TOOL_ERASE)) {
 		Object *ob = CTX_data_active_object(C);
 		SculptSession *ss = ob->sculpt;
 		Sculpt *sd = CTX_data_tool_settings(C)->sculpt;
