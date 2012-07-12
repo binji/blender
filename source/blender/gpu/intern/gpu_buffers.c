@@ -1397,27 +1397,82 @@ void GPU_update_mesh_buffers(GPU_Buffers *buffers, MVert *mvert,
                              int *vert_indices, int totvert, const float *vmask)
 {
 	VertexBufferFormat *vert_data;
-	int i;
+	int i, j, k;
 
 	buffers->vmask = vmask;
 
 	if (buffers->vert_buf) {
+		int totelem = (buffers->smooth ? totvert : (buffers->tot_tri * 3));
+
 		/* Build VBO */
 		glBindBufferARB(GL_ARRAY_BUFFER_ARB, buffers->vert_buf);
 		glBufferDataARB(GL_ARRAY_BUFFER_ARB,
-		                sizeof(VertexBufferFormat) * totvert,
-		                NULL, GL_STATIC_DRAW_ARB);
+						sizeof(VertexBufferFormat) * totelem,
+						NULL, GL_STATIC_DRAW_ARB);
+
 		vert_data = glMapBufferARB(GL_ARRAY_BUFFER_ARB, GL_WRITE_ONLY_ARB);
 
 		if (vert_data) {
-			for (i = 0; i < totvert; ++i) {
-				MVert *v = mvert + vert_indices[i];
-				VertexBufferFormat *out = vert_data + i;
+			/* Vertex data is shared if smooth-shaded, but seperate
+			   copies are made for flat shading because normals
+			   shouldn't be shared. */
+			if (buffers->smooth) {
+				for (i = 0; i < totvert; ++i) {
+					MVert *v = mvert + vert_indices[i];
+					VertexBufferFormat *out = vert_data + i;
 
-				copy_v3_v3(out->co, v->co);
-				memcpy(out->no, v->no, sizeof(short) * 3);
-				gpu_color_from_mask_copy(vmask[vert_indices[i]],
-				                         out->color);
+					copy_v3_v3(out->co, v->co);
+					memcpy(out->no, v->no, sizeof(short) * 3);
+					gpu_color_from_mask_copy(vmask[vert_indices[i]],
+											 out->color);
+				}
+			}
+			else {
+				for (i = 0; i < buffers->totface; ++i) {
+					const MFace *f = &buffers->mface[buffers->face_indices[i]];
+					const unsigned int *fv = &f->v1;
+					const int vi[2][3] = {{0, 1, 2}, {3, 0, 2}};
+					float fno[3];
+					short no[3];
+
+					float fmask;
+
+					/* Face normal and mask */
+					if (f->v4) {
+						normal_quad_v3(fno,
+									   mvert[fv[0]].co,
+									   mvert[fv[1]].co,
+									   mvert[fv[2]].co,
+									   mvert[fv[3]].co);
+						fmask = (vmask[fv[0]] +
+								 vmask[fv[1]] +
+								 vmask[fv[2]] +
+								 vmask[fv[3]]) * 0.25;
+					}
+					else {
+						normal_tri_v3(fno,
+									  mvert[fv[0]].co,
+									  mvert[fv[1]].co,
+									  mvert[fv[2]].co);
+						fmask = (vmask[fv[0]] +
+								 vmask[fv[1]] +
+								 vmask[fv[2]]) / 3.0f;
+					}
+					normal_float_to_short_v3(no, fno);
+
+					for (j = 0; j < (f->v4 ? 2 : 1); j++) {
+						for (k = 0; k < 3; k++) {
+							const MVert *v = &mvert[fv[vi[j][k]]];
+							VertexBufferFormat *out = vert_data;
+
+							copy_v3_v3(out->co, v->co);
+							memcpy(out->no, no, sizeof(short) * 3);
+							gpu_color_from_mask_copy(fmask, out->color);
+
+							vert_data++;
+						}
+					}
+				}
 			}
 
 			glUnmapBufferARB(GL_ARRAY_BUFFER_ARB);
@@ -1452,8 +1507,11 @@ GPU_Buffers *GPU_build_mesh_buffers(int (*face_vert_indices)[4],
 		if (!paint_is_face_hidden(f, mvert))
 			tottri += f->v4 ? 2 : 1;
 	}
-	
-	if (gpu_vbo_enabled())
+
+	/* An element index buffer is used for smooth shading, but flat
+	   shading requires separate vertex normals so an index buffer is
+	   can't be used there. */
+	if (gpu_vbo_enabled() && buffers->smooth)
 		glGenBuffersARB(1, &buffers->index_buf);
 
 	if (buffers->index_buf) {
@@ -1497,7 +1555,7 @@ GPU_Buffers *GPU_build_mesh_buffers(int (*face_vert_indices)[4],
 		glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, 0);
 	}
 
-	if (buffers->index_buf)
+	if (buffers->index_buf || !buffers->smooth)
 		glGenBuffersARB(1, &buffers->vert_buf);
 
 	buffers->tot_tri = tottri;
@@ -1954,15 +2012,17 @@ void GPU_draw_buffers(GPU_Buffers *buffers, DMSetMaterial setMaterial)
 			return;
 	}
 
-	glShadeModel(buffers->smooth ? GL_SMOOTH : GL_FLAT);
+	glShadeModel((buffers->smooth || buffers->totface) ? GL_SMOOTH : GL_FLAT);
 
-	if (buffers->vert_buf && buffers->index_buf) {
+	if (buffers->vert_buf) {
 		glEnableClientState(GL_VERTEX_ARRAY);
 		glEnableClientState(GL_NORMAL_ARRAY);
 		gpu_colors_enable(VBO_ENABLED);
 
 		glBindBufferARB(GL_ARRAY_BUFFER_ARB, buffers->vert_buf);
-		glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, buffers->index_buf);
+
+		if (buffers->index_buf)
+			glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, buffers->index_buf);
 
 		if (buffers->tot_quad) {
 			char *offset = 0;
@@ -1981,6 +2041,8 @@ void GPU_draw_buffers(GPU_Buffers *buffers, DMSetMaterial setMaterial)
 			}
 		}
 		else {
+			int totelem = buffers->tot_tri * 3;
+
 			glVertexPointer(3, GL_FLOAT, sizeof(VertexBufferFormat),
 			                (void *)offsetof(VertexBufferFormat, co));
 			glNormalPointer(GL_SHORT, sizeof(VertexBufferFormat),
@@ -1988,11 +2050,15 @@ void GPU_draw_buffers(GPU_Buffers *buffers, DMSetMaterial setMaterial)
 			glColorPointer(3, GL_UNSIGNED_BYTE, sizeof(VertexBufferFormat),
 			               (void *)offsetof(VertexBufferFormat, color));
 
-			glDrawElements(GL_TRIANGLES, buffers->tot_tri * 3, buffers->index_type, 0);
+			if (buffers->index_buf)
+				glDrawElements(GL_TRIANGLES, totelem, buffers->index_type, 0);
+			else
+				glDrawArrays(GL_TRIANGLES, 0, totelem);
 		}
 
 		glBindBufferARB(GL_ARRAY_BUFFER_ARB, 0);
-		glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, 0);
+		if (buffers->index_buf)
+			glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, 0);
 
 		glDisableClientState(GL_VERTEX_ARRAY);
 		glDisableClientState(GL_NORMAL_ARRAY);
