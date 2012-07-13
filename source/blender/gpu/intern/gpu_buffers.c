@@ -49,6 +49,7 @@
 
 #include "BKE_ccg.h"
 #include "BKE_DerivedMesh.h"
+#include "BKE_global.h"
 #include "BKE_paint.h"
 #include "BKE_subsurf.h"
 
@@ -1847,7 +1848,8 @@ static void gpu_bmesh_vert_buffer_add(BMVert *v, BMesh *bm,
 									  VertexBufferFormat *vert_data,
 									  int *v_index,
 									  const float fno[3],
-									  const float *fmask)
+									  const float *fmask,
+									  GPU_Buffers *buffers)
 {
 	VertexBufferFormat *vd = &vert_data[*v_index];
 	float *mask;
@@ -1859,6 +1861,14 @@ static void gpu_bmesh_vert_buffer_add(BMVert *v, BMesh *bm,
 		mask = CustomData_bmesh_get(&bm->vdata, v->head.data, CD_PAINT_MASK);
 		gpu_color_from_mask_copy(fmask ? *fmask : *mask, vd->color);
 		
+
+		if (buffers) {
+			/* XXX: just for testing, assign a color to each PBVH node */
+			srand((unsigned long long)buffers % 65535);
+			vd->color[0] = (rand() % 128) + 127;
+			vd->color[1] = (rand() % 128) + 127;
+			vd->color[2] = (rand() % 128) + 127;
+		}
 
 		/* Assign index for use in the triangle index buffer */
 		BM_elem_index_set(v, (*v_index)); /* set_dirty! */
@@ -1949,6 +1959,7 @@ void GPU_update_bmesh_buffers(GPU_Buffers *buffers,
 	/* Fill vertex buffer */
 	vert_data = glMapBufferARB(GL_ARRAY_BUFFER_ARB, GL_WRITE_ONLY_ARB);
 	if (vert_data) {
+		GPU_Buffers *cb = (G.debug_value == 41) ? buffers : NULL;
 		GHashIterator gh_iter;
 		int v_index = 0;
 
@@ -1959,12 +1970,14 @@ void GPU_update_bmesh_buffers(GPU_Buffers *buffers,
 
 			GHASH_ITER (gh_iter, bm_unique_verts) {
 				gpu_bmesh_vert_buffer_add(BLI_ghashIterator_getKey(&gh_iter),
-										  bm, vert_data, &v_index, NULL, NULL);
+										  bm, vert_data, &v_index, NULL, NULL,
+										  cb);
 			}
 
 			GHASH_ITER (gh_iter, bm_other_verts) {
 				gpu_bmesh_vert_buffer_add(BLI_ghashIterator_getKey(&gh_iter),
-										  bm, vert_data, &v_index, NULL, NULL);
+										  bm, vert_data, &v_index, NULL, NULL,
+										  cb);
 			}
 
 			/* XXX: need to address this still, node might gain more
@@ -1994,7 +2007,8 @@ void GPU_update_bmesh_buffers(GPU_Buffers *buffers,
 					
 					for (i = 0; i < 3; i++) {
 						gpu_bmesh_vert_buffer_add(v[i], bm, vert_data,
-												  &v_index, f->no, &fmask);
+												  &v_index, f->no, &fmask,
+												  cb);
 					}
 				}
 			}
