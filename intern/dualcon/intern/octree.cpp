@@ -382,22 +382,22 @@ InternalNode *Octree::addTriangle(InternalNode *node, CubeTriangleIsect *p, int 
 
 			/* Pruning using intersection test */
 			if (subp->isIntersecting()) {
-				if (!hasChild(node, i)) {
+				if (!node->has_child(i)) {
 					if (height == 1)
 						node = addLeafChild(node, i, count, createLeaf(0));
 					else
 						node = addInternalChild(node, i, count, createInternal(0));
 				}
-				Node *chd = getChild(node, count);
+				Node *chd = node->get_child(count);
 
 				if (node->is_child_leaf(i))
-					setChild(node, count, (Node *)updateCell(&chd->leaf, subp));
+					node->set_child(count, (Node *)updateCell(&chd->leaf, subp));
 				else
-					setChild(node, count, (Node *)addTriangle(&chd->internal, subp, height - 1));
+					node->set_child(count, (Node *)addTriangle(&chd->internal, subp, height - 1));
 			}
 		}
 
-		if (hasChild(node, i))
+		if (node->has_child(i))
 			count++;
 	}
 
@@ -448,11 +448,11 @@ void Octree::preparePrimalEdgesMask(InternalNode *node)
 {
 	int count = 0;
 	for (int i = 0; i < 8; i++) {
-		if (hasChild(node, i)) {
+		if (node->has_child(i)) {
 			if (node->is_child_leaf(i))
-				createPrimalEdgesMask(&getChild(node, count)->leaf);
+				createPrimalEdgesMask(&node->get_child(count)->leaf);
 			else
-				preparePrimalEdgesMask(&getChild(node, count)->internal);
+				preparePrimalEdgesMask(&node->get_child(count)->internal);
 
 			count++;
 		}
@@ -485,7 +485,7 @@ Node *Octree::trace(Node *newnode, int *st, int len, int depth, PathList *& path
 
 	// Get children paths
 	int chdleaf[8];
-	fillChildren(&newnode->internal, chd, chdleaf);
+	newnode->internal.fill_children(chd, chdleaf);
 
 	// int count = 0;
 	for (i = 0; i < 8; i++) {
@@ -508,7 +508,7 @@ Node *Octree::trace(Node *newnode, int *st, int len, int depth, PathList *& path
 	int df[2] = {depth - 1, depth - 1};
 	int *nstf[2];
 
-	fillChildren(&newnode->internal, chd, chdleaf);
+	newnode->internal.fill_children(chd, chdleaf);
 
 	for (i = 0; i < 12; i++) {
 		int c[2] = {cellProcFaceMask[i][0], cellProcFaceMask[i][1]};
@@ -588,7 +588,7 @@ void Octree::findPaths(Node *node[2], int leaf[2], int depth[2], int *st[2], int
 
 		for (j = 0; j < 2; j++) {
 			if (!leaf[j]) {
-				fillChildren(&node[j]->internal, chd[j], chdleaf[j]);
+				node[j]->internal.fill_children(chd[j], chdleaf[j]);
 
 				int len = (dimen >> (maxDepth - depth[j] + 1));
 				for (i = 0; i < 8; i++) {
@@ -964,10 +964,10 @@ Node *Octree::patch(Node *newnode, int st[3], int len, PathList *rings)
 				st[1] + len * vertmap[i][1],
 				st[2] + len * vertmap[i][2]
 			};
-			patch(getChild(&newnode->internal, count), nori, len, zlists[i]);
+			patch(newnode->internal.get_child(count), nori, len, zlists[i]);
 		}
 
-		if (hasChild(&newnode->internal, i)) {
+		if (newnode->internal.has_child(i)) {
 			count++;
 		}
 	}
@@ -1406,16 +1406,16 @@ Node *Octree::locateCell(InternalNode *node, int st[3], int len, int ori[3], int
 	rst[1] = st[1] + vertmap[ind][1] * len;
 	rst[2] = st[2] + vertmap[ind][2] * len;
 
-	if (hasChild(node, ind)) {
-		int count = getChildCount(node, ind);
-		Node *chd = getChild(node, count);
+	if (node->has_child(ind)) {
+		int count = node->get_child_count(ind);
+		Node *chd = node->get_child(count);
 		if (node->is_child_leaf(ind)) {
 			rleaf = chd;
 			rlen = len;
 		}
 		else {
 			// Recur
-			setChild(node, count, locateCell(&chd->internal, rst, len, ori, dir, side, rleaf, rst, rlen));
+			node->set_child(count, locateCell(&chd->internal, rst, len, ori, dir, side, rleaf, rst, rlen));
 		}
 	}
 	else {
@@ -1722,7 +1722,7 @@ void Octree::buildSigns(unsigned char table[], Node *node, int isLeaf, int sg, i
 		// Internal node
 		Node *chd[8];
 		int leaf[8];
-		fillChildren(&node->internal, chd, leaf);
+		node->internal.fill_children(chd, leaf);
 
 		// Get the signs at the corners of the first cube
 		rvalue[0] = sg;
@@ -1782,8 +1782,8 @@ void Octree::clearProcessBits(Node *node, int height)
 		// Internal cell, recur
 		int count = 0;
 		for (i = 0; i < 8; i++) {
-			if (hasChild(&node->internal, i)) {
-				clearProcessBits(getChild(&node->internal, count), height - 1);
+			if (node->internal.has_child(i)) {
+				clearProcessBits(node->internal.get_child(count), height - 1);
 				count++;
 			}
 		}
@@ -2014,13 +2014,13 @@ int Octree::floodFill(Node *node, int st[3], int len, int height, int threshold)
 		int count = 0;
 		len >>= 1;
 		for (i = 0; i < 8; i++) {
-			if (hasChild((InternalNode *)node, i)) {
+			if (node->internal.has_child(i)) {
 				int nst[3];
 				nst[0] = st[0] + vertmap[i][0] * len;
 				nst[1] = st[1] + vertmap[i][1] * len;
 				nst[2] = st[2] + vertmap[i][2] * len;
 
-				int d = floodFill(getChild((InternalNode *)node, count), nst, len, height - 1, threshold);
+				int d = floodFill(node->internal.get_child(count), nst, len, height - 1, threshold);
 				if (d > maxtotal) {
 					maxtotal = d;
 				}
@@ -2060,9 +2060,9 @@ void Octree::writeOut()
 void Octree::countIntersection(Node *node, int height, int& nedge, int& ncell, int& nface)
 {
 	if (height > 0) {
-		int total = getNumChildren(&node->internal);
+		int total = node->internal.get_num_children();
 		for (int i = 0; i < total; i++) {
-			countIntersection(getChild(&node->internal, i), height - 1, nedge, ncell, nface);
+			countIntersection(node->internal.get_child(i), height - 1, nedge, ncell, nface);
 		}
 	}
 	else {
@@ -2173,7 +2173,8 @@ void minimize(float rvalue[3], float mp[3], const float pts[12][3],
 	solve_least_squares(ata, atb, mp, rvalue);
 }
 
-void Octree::computeMinimizer(LeafNode *leaf, int st[3], int len, float rvalue[3])
+void Octree::computeMinimizer(const LeafNode *leaf, int st[3], int len,
+							  float rvalue[3]) const
 {
 	// First, gather all edge intersections
 	float pts[12][3], norms[12][3];
@@ -2251,13 +2252,13 @@ void Octree::generateMinimizer(Node *node, int st[3], int len, int height, int& 
 		int count = 0;
 		len >>= 1;
 		for (i = 0; i < 8; i++) {
-			if (hasChild(&node->internal, i)) {
+			if (node->internal.has_child(i)) {
 				int nst[3];
 				nst[0] = st[0] + vertmap[i][0] * len;
 				nst[1] = st[1] + vertmap[i][1] * len;
 				nst[2] = st[2] + vertmap[i][2] * len;
 
-				generateMinimizer(getChild(&node->internal, count),
+				generateMinimizer(node->internal.get_child(count),
 				                  nst, len, height - 1, offset);
 				count++;
 			}
@@ -2342,9 +2343,9 @@ void Octree::edgeProcContour(Node *node[4], int leaf[4], int depth[4], int maxde
 		Node *chd[4][8];
 		for (j = 0; j < 4; j++) {
 			for (i = 0; i < 8; i++) {
-				chd[j][i] = ((!leaf[j]) && hasChild(&node[j]->internal, i)) ?
-				            getChild(&node[j]->internal,
-				                     getChildCount(&node[j]->internal, i)) : NULL;
+				chd[j][i] = ((!leaf[j]) && node[j]->internal.has_child(i)) ?
+				            node[j]->internal.get_child(
+				                     node[j]->internal.get_child_count(i)) : NULL;
 			}
 		}
 
@@ -2389,9 +2390,9 @@ void Octree::faceProcContour(Node *node[2], int leaf[2], int depth[2], int maxde
 		Node *chd[2][8];
 		for (j = 0; j < 2; j++) {
 			for (i = 0; i < 8; i++) {
-				chd[j][i] = ((!leaf[j]) && hasChild(&node[j]->internal, i)) ?
-				            getChild(&node[j]->internal,
-				                     getChildCount(&node[j]->internal, i)) : NULL;
+				chd[j][i] = ((!leaf[j]) && node[j]->internal.has_child(i)) ?
+				            node[j]->internal.get_child(
+				                     node[j]->internal.get_child_count(i)) : NULL;
 			}
 		}
 
@@ -2458,9 +2459,8 @@ void Octree::cellProcContour(Node *node, int leaf, int depth)
 		// Fill children nodes
 		Node *chd[8];
 		for (i = 0; i < 8; i++) {
-			chd[i] = ((!leaf) && hasChild(&node->internal, i)) ?
-			         getChild(&node->internal,
-			                  getChildCount(&node->internal, i)) : NULL;
+			chd[i] = ((!leaf) && node->internal.has_child(i)) ?
+			         node->internal.get_child(node->internal.get_child_count(i)) : NULL;
 		}
 
 		// 8 Cell calls
@@ -2537,8 +2537,8 @@ void Octree::edgeProcParity(Node *node[4], int leaf[4], int depth[4], int maxdep
 		Node *chd[4][8];
 		for (j = 0; j < 4; j++) {
 			for (i = 0; i < 8; i++) {
-				chd[j][i] = ((!leaf[j]) && hasChild(&node[j]->internal, i)) ?
-				            getChild(&node[j]->internal, getChildCount(&node[j]->internal, i)) : NULL;
+				chd[j][i] = ((!leaf[j]) && node[j]->internal.has_child(i)) ?
+				            node[j]->internal.get_child( node[j]->internal.get_child_count(i)) : NULL;
 			}
 		}
 
@@ -2587,9 +2587,9 @@ void Octree::faceProcParity(Node *node[2], int leaf[2], int depth[2], int maxdep
 		Node *chd[2][8];
 		for (j = 0; j < 2; j++) {
 			for (i = 0; i < 8; i++) {
-				chd[j][i] = ((!leaf[j]) && hasChild(&node[j]->internal, i)) ?
-				            getChild(&node[j]->internal,
-				                     getChildCount(&node[j]->internal, i)) : NULL;
+				chd[j][i] = ((!leaf[j]) && node[j]->internal.has_child(i)) ?
+				            node[j]->internal.get_child(
+				                     node[j]->internal.get_child_count(i)) : NULL;
 			}
 		}
 
@@ -2656,9 +2656,8 @@ void Octree::cellProcParity(Node *node, int leaf, int depth)
 		// Fill children nodes
 		Node *chd[8];
 		for (i = 0; i < 8; i++) {
-			chd[i] = ((!leaf) && hasChild((InternalNode *)node, i)) ?
-			         getChild((InternalNode *)node,
-			                  getChildCount((InternalNode *)node, i)) : NULL;
+			chd[i] = ((!leaf) && node->internal.has_child(i)) ?
+			         node->internal.get_child(node->internal.get_child_count(i)) : NULL;
 		}
 
 		// 8 Cell calls
@@ -2801,3 +2800,7 @@ const int dirEdge[3][4] = {
 	{7, 6, 5, 4},
 	{11, 10, 9, 8}
 };
+
+int InternalNode::numChildrenTable[256];
+int InternalNode::childrenCountTable[256][8];
+int InternalNode::childrenIndexTable[256][8];
