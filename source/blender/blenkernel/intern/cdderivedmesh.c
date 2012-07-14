@@ -2428,9 +2428,112 @@ void CDDM_calc_edges_tessface(DerivedMesh *dm)
 	BLI_edgehash_free(eh, NULL);
 }
 
+/* Note: unsigned int to match MEdge SDNA */
+
+typedef struct {
+	unsigned int v2;
+	int edge_index;
+} VertAdjPair;
+
+typedef struct {
+	VertAdjPair *pairs;
+	int len;
+	int max;
+} VertAdjHead;
+
+typedef struct {
+	VertAdjHead *heads;
+	int totedge;
+} VertAdj;
+
+static int vert_adj_get_edge_index(const VertAdj *adj,
+								   unsigned int v1,
+								   unsigned int v2)
+{
+	const VertAdjHead *head;
+	int i;
+
+	BLI_assert(v1 != v2);
+
+	/* Use lower vertex index as key */
+	if (v1 > v2)
+		SWAP(unsigned int, v1, v2);
+
+	head = &adj->heads[v1];
+
+	/* Search adjacent vertices */
+	for (i = 0; i < head->len; i++) {
+		if (head->pairs[i].v2 == v2)
+			return head->pairs[i].edge_index;
+	}
+
+	BLI_assert(!"Edge not found");
+	return -1;
+}
+
+/* Precondition: v1 must be less than v2 */
+static int vert_adj_has(const VertAdj *adj,
+						const unsigned int v1,
+						const unsigned int v2)
+{
+	const VertAdjHead *head = &adj->heads[v1];
+	int i;
+
+	/* Search adjacent vertices */
+	for (i = 0; i < head->len; i++) {
+		if (head->pairs[i].v2 == v2)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+/* Add edge v1->v2 to the adjacency list and assign edge_index */
+static void vert_adj_add(VertAdj *adj,
+						 unsigned int v1,
+						 unsigned int v2,
+						 const int edge_index)
+{
+	VertAdjHead *head;
+	VertAdjPair *pair;
+
+	BLI_assert(v1 != v2);
+
+	/* Use lower vertex index as key */
+	if (v1 > v2)
+		SWAP(unsigned int, v1, v2);
+
+	if (vert_adj_has(adj, v1, v2))
+		return;
+
+	head = &adj->heads[v1];
+
+	/* TODO: could try collections of mempools for low-degree vertices
+	   to decrease reallocations */
+
+	if (head->max == 0) {
+		/* Allocate single adjacency */
+		head->max = 1;
+		head->pairs = MEM_mallocN(sizeof(VertAdjPair), AT);
+	}
+	else if (head->len == head->max) {
+		/* Double size of array */
+		head->max += head->max;
+		head->pairs = MEM_reallocN(head->pairs,
+								   sizeof(VertAdjPair) * head->max);
+	}
+
+	pair = &head->pairs[head->len];
+	pair->v2 = v2;
+	pair->edge_index = edge_index;
+	head->len++;
+	adj->totedge++;
+}
+
 /* warning, this uses existing edges but CDDM_calc_edges_tessface() doesn't */
 void CDDM_calc_edges(DerivedMesh *dm)
 {
+#if 0
 	CDDerivedMesh *cddm = (CDDerivedMesh *)dm;
 	CustomData edgeData;
 	EdgeHashIterator *ehi;
@@ -2504,6 +2607,89 @@ void CDDM_calc_edges(DerivedMesh *dm)
 	}
 
 	BLI_edgehash_free(eh, NULL);
+#else
+	CDDerivedMesh *cddm = (CDDerivedMesh *)dm;
+	VertAdj adj = {NULL, 0};
+	int i, totedge, *orig_indices;
+
+	adj.heads = MEM_callocN(sizeof(VertAdjHead) * dm->numVertData, AT);
+
+	/* Add existing edges to 'adj' */
+	for (i = 0; i < dm->numEdgeData; i++) {
+		const MEdge *e = &cddm->medge[i];
+		vert_adj_add(&adj, e->v1, e->v2, i + 1);
+	}
+
+	/* Add remaining loop edges to 'adj' */
+	for (i = 0; i < dm->numPolyData; i++) {
+		const MPoly *p = &cddm->mpoly[i];
+		int j;
+
+		for (j = 0; j < p->totloop; j++) {
+			const MLoop *l = &cddm->mloop[p->loopstart + j];
+
+			vert_adj_add(&adj, l->v,
+						 ME_POLY_LOOP_NEXT(cddm->mloop, p, j)->v, 0);
+		}
+	}
+
+	/* Free existing edge CustomData */
+	CustomData_free(&dm->edgeData, dm->numEdgeData);
+	
+	/* Add new MEdge/original index CustomData */
+	memset(&dm->edgeData, 0, sizeof(dm->edgeData));
+	CustomData_add_layer(&dm->edgeData, CD_MEDGE, CD_CALLOC,
+						 NULL, adj.totedge);
+	CustomData_add_layer(&dm->edgeData, CD_ORIGINDEX, CD_CALLOC,
+						 NULL, adj.totedge);
+
+	/* Update DerivedMesh edge data */
+	dm->numEdgeData = adj.totedge;
+	cddm->medge = CustomData_get_layer(&dm->edgeData, CD_MEDGE);
+
+	/* Output MEdges and original edge indices */
+	orig_indices = CustomData_get_layer(&dm->edgeData, CD_ORIGINDEX);
+	totedge = 0;
+	for (i = 0; i < dm->numVertData; i++) {
+		VertAdjHead *head = &adj.heads[i];
+		int j;
+
+		for (j = 0; j < head->len; j++, totedge++) {
+			VertAdjPair *pair = &head->pairs[j];
+			MEdge *e = &cddm->medge[totedge];
+
+			e->v1 = i;
+			e->v2 = pair->v2;
+			e->flag = ME_EDGEDRAW | ME_EDGERENDER;
+
+			orig_indices[totedge] = (pair->edge_index ?
+									 pair->edge_index - 1 :
+									 ORIGINDEX_NONE);
+
+			/* Update edge_index for updating loop edges */
+			pair->edge_index = totedge;
+		}
+	}
+
+	for (i = 0; i < dm->numPolyData; i++) {
+		const MPoly *p = &cddm->mpoly[i];
+		int j;
+
+		for (j = 0; j < p->totloop; j++) {
+			MLoop *l = &cddm->mloop[p->loopstart + j];
+			unsigned int v2 = ME_POLY_LOOP_NEXT(cddm->mloop, p, j)->v;
+
+			l->e = vert_adj_get_edge_index(&adj, l->v, v2);
+		}
+	}
+
+	for (i = 0; i < dm->numVertData; i++) {
+		if (adj.heads[i].pairs)
+			MEM_freeN(adj.heads[i].pairs);
+	}
+	if (adj.heads)
+		MEM_freeN(adj.heads);
+#endif
 }
 
 void CDDM_lower_num_verts(DerivedMesh *dm, int numVerts)
