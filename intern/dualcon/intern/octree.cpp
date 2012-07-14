@@ -140,7 +140,7 @@ void Octree::scanConvert()
 
 	// Check again
 	int tnumRings = numRings;
-	trace();
+	//trace();
 #ifdef IN_VERBOSE_MODE
 	dc_printf("Holes after patching: %d \n", numRings);
 #endif
