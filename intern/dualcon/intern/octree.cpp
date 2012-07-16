@@ -108,95 +108,32 @@ Octree::~Octree()
 void Octree::scanConvert()
 {
 	// Scan triangles
-#if DC_DEBUG
-	clock_t start, finish;
-	start = clock();
-#endif
-
 	addAllTriangles();
 	resetMinimalEdges();
 	preparePrimalEdgesMask(&root->internal);
 
-#if DC_DEBUG
-	finish = clock();
-	dc_printf("Time taken: %f seconds                   \n",
-	          (double)(finish - start) / CLOCKS_PER_SEC);
-#endif
-
 	// Generate signs
 	// Find holes
-#if DC_DEBUG
-	dc_printf("Patching...\n");
-	start = clock();
-#endif
 	trace();
-#if DC_DEBUG
-	finish = clock();
-	dc_printf("Time taken: %f seconds \n",  (double)(finish - start) / CLOCKS_PER_SEC);
-#ifdef IN_VERBOSE_MODE
 	dc_printf("Holes: %d Average Length: %f Max Length: %d \n", numRings, (float)totRingLengths / (float) numRings, maxRingLength);
-#endif
-#endif
 
 	// Check again
 	int tnumRings = numRings;
 	//trace();
-#ifdef IN_VERBOSE_MODE
 	dc_printf("Holes after patching: %d \n", numRings);
-#endif
 	numRings = tnumRings;
 
-#if DC_DEBUG
-	dc_printf("Building signs...\n");
-	start = clock();
-#endif
 	buildSigns();
-#if DC_DEBUG
-	finish = clock();
-	dc_printf("Time taken: %f seconds \n",  (double)(finish - start) / CLOCKS_PER_SEC);
-#endif
 
 	if (use_flood_fill) {
-		/*
-		   start = clock();
-		   floodFill();
-		   // Check again
-		   tnumRings = numRings;
-		   trace();
-		   dc_printf("Holes after filling: %d \n", numRings);
-		   numRings = tnumRings;
-		   buildSigns();
-		   finish = clock();
-		   dc_printf("Time taken: %f seconds \n",	(double)(finish - start) / CLOCKS_PER_SEC);
-		 */
-#if DC_DEBUG
-		start = clock();
-		dc_printf("Removing components...\n");
-#endif
 		floodFill();
 		buildSigns();
 		//	dc_printf("Checking...\n");
 		//	floodFill();
-#if DC_DEBUG
-		finish = clock();
-		dc_printf("Time taken: %f seconds \n", (double)(finish - start) / CLOCKS_PER_SEC);
-#endif
 	}
 
 	// Output
-#if DC_DEBUG
-	start = clock();
-#endif
 	writeOut();
-#if DC_DEBUG
-	finish = clock();
-#endif
-	// dc_printf("Time taken: %f seconds \n",	(double)(finish - start) / CLOCKS_PER_SEC);
-
-	// Print info
-#ifdef IN_VERBOSE_MODE
-	printMemUsage();
-#endif
 }
 
 void Octree::initMemory()
@@ -259,86 +196,39 @@ void Octree::resetMinimalEdges()
 
 void Octree::addAllTriangles()
 {
-	Triangle *trian;
-	int count = 0;
+	const int num_faces = reader->getNumFaces();
 
-#if DC_DEBUG
-	int total = reader->getNumTriangles();
-	int unitcount = 1000;
-	dc_printf("\nScan converting to depth %d...\n", maxDepth);
-#endif
+	for (int i = 0; i < num_faces; i++) {
+		float co[4][3];
+		int S = reader->getFace(i, co);
 
-	srand(0);
-
-	while ((trian = reader->getNextTriangle()) != NULL) {
-		// Drop triangles
-		{
-			addTriangle(trian, count);
-		}
-		delete trian;
-
-		count++;
-
-#if DC_DEBUG
-		if (count % unitcount == 0) {
-			putchar(13);
-
-			switch ((count / unitcount) % 4) {
-				case 0: dc_printf("-");
-					break;
-				case 1: dc_printf("/");
-					break;
-				case 2: dc_printf("|");
-					break;
-				case 3: dc_printf("\\");
-					break;
-			}
-
-			float percent = (float) count / total;
-
-			/*
-			   int totbars = 50;
-			   int bars =(int)(percent * totbars);
-			   for(int i = 0; i < bars; i ++) {
-			    putchar(219);
-			   }
-			   for(i = bars; i < totbars; i ++) {
-			    putchar(176);
-			   }
-			 */
-
-			dc_printf(" %d triangles: ", count);
-			dc_printf(" %f%% complete.", 100 * percent);
-		}
-#endif
-
+		if (S >= 3)
+			addTriangle(co[0], co[1], co[2]);
+		if (S == 4)
+			addTriangle(co[2], co[3], co[0]);
 	}
-	putchar(13);
 }
 
 /* Prepare a triangle for insertion into the octree; call the other
    addTriangle() to (recursively) build the octree */
-void Octree::addTriangle(Triangle *trian, int triind)
+void Octree::addTriangle(const float v1[3], const float v2[3], const float v3[3])
 {
-	int i, j;
+	int i;
 
 	/* Project the triangle's coordinates into the grid */
+	int64_t trig[3][3];
 	for (i = 0; i < 3; i++) {
-		for (j = 0; j < 3; j++)
-			trian->vt[i][j] = dimen * (trian->vt[i][j] - origin[j]) / range;
+		trig[0][i] = (int64_t)(dimen * (v1[i] - origin[i]) / range);
+		trig[1][i] = (int64_t)(dimen * (v2[i] - origin[i]) / range);
+		trig[2][i] = (int64_t)(dimen * (v3[i] - origin[i]) / range);
 	}
 
 	/* Generate projections */
 	int64_t cube[2][3] = {{0, 0, 0}, {dimen, dimen, dimen}};
-	int64_t trig[3][3];
-	for (i = 0; i < 3; i++) {
-		for (j = 0; j < 3; j++)
-			trig[i][j] = (int64_t)(trian->vt[i][j]);
-	}
 
 	/* Add triangle to the octree */
 	int64_t errorvec = (int64_t)(0);
-	CubeTriangleIsect *proj = new CubeTriangleIsect(cube, trig, errorvec, triind);
+	CubeTriangleIsect *proj = new CubeTriangleIsect(cube, trig, errorvec);
 	root = (Node *)addTriangle(&root->internal, proj, maxDepth);
 
 	delete proj->inherit;
@@ -417,10 +307,10 @@ LeafNode *Octree::updateCell(LeafNode *node, CubeTriangleIsect *p)
 	float a[3], b[3], c[3];
 
 	for (i = 0; i < 3; i++) {
-		if (!getEdgeParity(node, mask[i])) {
+		if (!node->get_edge_parity(mask[i])) {
 			if (p->isIntersectingPrimary(i)) {
 				// actualQuads ++;
-				setEdge(node, mask[i]);
+				node->set_edge(mask[i]);
 				offs[newc] = p->getIntersectionPrimary(i);
 				a[newc] = (float) p->inherit->norm[0];
 				b[newc] = (float) p->inherit->norm[1];
@@ -429,7 +319,7 @@ LeafNode *Octree::updateCell(LeafNode *node, CubeTriangleIsect *p)
 			}
 		}
 		else {
-			offs[newc] = getEdgeOffsetNormal(node, oldc, a[newc], b[newc], c[newc]);
+			offs[newc] = node->get_edge_offset_normal(oldc, a[newc], b[newc], c[newc]);
 
 			oldc++;
 			newc++;
@@ -855,9 +745,6 @@ void Octree::printPath(PathList *path)
 	PathElement *n = path->head;
 	int same = 0;
 
-#if DC_DEBUG
-	int len = (dimen >> maxDepth);
-#endif
 	while (n && (same == 0 || n != path->head)) {
 		same++;
 		dc_printf("(%d %d %d)", n->pos[0] / len, n->pos[1] / len, n->pos[2] / len);
@@ -876,9 +763,7 @@ void Octree::printPath(PathElement *path)
 {
 	PathElement *n = path;
 	int same = 0;
-#if DC_DEBUG
-	int len = (dimen >> maxDepth);
-#endif
+
 	while (n && (same == 0 || n != path)) {
 		same++;
 		dc_printf("(%d %d %d)", n->pos[0] / len, n->pos[1] / len, n->pos[2] / len);
@@ -1506,7 +1391,7 @@ void Octree::getFacePoint(PathElement *leaf, int dir, int& x, int& y, float& p, 
 			avg[2] += off[2];
 			num++;
 		}
-		if (getEdgeParity(leafnode, edgeind)) {
+		if (leafnode->get_edge_parity(edgeind)) {
 			num2++;
 		}
 	}
@@ -1742,7 +1627,7 @@ void Octree::buildSigns(unsigned char table[], Node *node, int isLeaf, int sg, i
 		generateSigns(&node->leaf, table, sg);
 
 		for (int i = 0; i < 8; i++) {
-			rvalue[i] = getSign(&node->leaf, i);
+			rvalue[i] = node->leaf.get_sign(i);
 		}
 	}
 }
@@ -1800,7 +1685,7 @@ int Octree::floodFill(LeafNode *leaf, int st[3], int len, int height, int thresh
 
 	// Test if the leaf has intersection edges
 	for (i = 0; i < 12; i++) {
-		par = getEdgeParity(leaf, i);
+		par = leaf->get_edge_parity(i);
 		inp = isInProcess(leaf, i);
 
 		if (par == 1 && inp == 0) {
@@ -1843,7 +1728,7 @@ int Octree::floodFill(LeafNode *leaf, int st[3], int len, int height, int thresh
 				}
 
 				// Middle sign
-				int s = getSign(cs[0], 0);
+				int s = cs[0]->get_sign(0);
 
 				// Masks
 				int fcCells[4] = {1, 0, 1, 0};
@@ -1861,7 +1746,7 @@ int Octree::floodFill(LeafNode *leaf, int st[3], int len, int height, int thresh
 						// Original order
 						for (eind = 0; eind < 3; eind++) {
 							edge = fcEdges[dir][find][eind];
-							if (getEdgeParity(cs[cind], edge) == 1) {
+							if (cs[cind]->get_edge_parity(edge) == 1) {
 								break;
 							}
 						}
@@ -1870,7 +1755,7 @@ int Octree::floodFill(LeafNode *leaf, int st[3], int len, int height, int thresh
 						// Inverse order
 						for (eind = 2; eind >= 0; eind--) {
 							edge = fcEdges[dir][find][eind];
-							if (getEdgeParity(cs[cind], edge) == 1) {
+							if (cs[cind]->get_edge_parity(edge) == 1) {
 								break;
 							}
 						}
@@ -1943,7 +1828,7 @@ int Octree::floodFill(LeafNode *leaf, int st[3], int len, int height, int thresh
 					cs[j] = locateLeaf(cst[j]);
 
 				// Middle sign
-				int s = getSign(cs[0], 0);
+				int s = cs[0]->get_sign(0);
 
 				// Masks
 				int fcCells[4] = {1, 0, 1, 0};
@@ -1986,7 +1871,7 @@ int Octree::floodFill(LeafNode *leaf, int st[3], int len, int height, int thresh
 						est[2] = cst[cind][2] + vertmap[edgemap[edge][0]][2] * len;
 						int edir = edge / 4;
 
-						if (getEdgeParity(cs[cind], edge) == 1) {
+						if (cs[cind]->get_edge_parity(edge) == 1) {
 							flipParityAll(est, edir);
 							queue->pushQueue(est, edir);
 							// dc_printf("Pushed: est: %d %d %d, edir: %d\n", est[0]/len, est[1]/len, est[2]/len, edir);
@@ -2068,7 +1953,7 @@ void Octree::countIntersection(Node *node, int height, int& nedge, int& ncell, i
 	else {
 		nedge += getNumEdges2(&node->leaf);
 
-		int smask = getSignMask(&node->leaf);
+		int smask = node->leaf.get_sign_mask();
 
 		if (use_manifold) {
 			int comps = manifold_table[smask].comps;
@@ -2158,7 +2043,7 @@ static void minimize(float rvalue[3], float mp[3], const float pts[12][3],
 	int ec = 0;
 
 	for (int i = 0; i < 12; i++) {
-		// if(getEdgeParity(leaf, i))
+		// if(leaf->get_edge_parity(i))
 		if (parity[i]) {
 			const float *norm = norms[i];
 			const float *p = pts[i];
@@ -2267,7 +2152,7 @@ void Octree::generateMinimizer(Node *node, int st[3], int len, int height, int& 
 			//fnst[j] = st[j] * range / dimen + origin[j];
 		}
 
-		int mult = 0, smask = getSignMask(&node->leaf);
+		int mult = 0, smask = node->leaf.get_sign_mask();
 
 		if (use_manifold) {
 			mult = manifold_table[smask].comps;
@@ -2283,7 +2168,7 @@ void Octree::generateMinimizer(Node *node, int st[3], int len, int height, int& 
 		}
 
 		// Store the index
-		setMinimizerIndex(&node->leaf, offset);
+		node->leaf.set_minimizer_index(offset);
 
 		offset += mult;
 	}
@@ -2306,16 +2191,16 @@ void Octree::generateMinimizer(Node *node, int st[3], int len, int height, int& 
 	}
 }
 
-void Octree::processEdgeWrite(Node *node[4], int depth[4], int maxdep, int dir)
+void Octree::processEdgeWrite(const Node *node[4], const int depth[4], int maxdep, int dir) const
 {
 	//int color = 0;
 
 	int i = 3;
 	{
-		if (getEdgeParity((LeafNode *)(node[i]), processEdgeMask[dir][i])) {
+		if (node[i]->leaf.get_edge_parity(processEdgeMask[dir][i])) {
 			int flip = 0;
 			int edgeind = processEdgeMask[dir][i];
-			if (getSign((LeafNode *)node[i], edgemap[edgeind][1]) > 0) {
+			if (node[i]->leaf.get_sign(edgemap[edgeind][1]) > 0) {
 				flip = 1;
 			}
 
@@ -2346,16 +2231,16 @@ void Octree::processEdgeWrite(Node *node[4], int depth[4], int maxdep, int dir)
 				}
 				else {
 					if (flip) {
-						ind[0] = getMinimizerIndex((LeafNode *)(node[2]));
-						ind[1] = getMinimizerIndex((LeafNode *)(node[3]));
-						ind[2] = getMinimizerIndex((LeafNode *)(node[1]));
-						ind[3] = getMinimizerIndex((LeafNode *)(node[0]));
+						ind[0] = node[2]->leaf.get_minimizer_index();
+						ind[1] = node[3]->leaf.get_minimizer_index();
+						ind[2] = node[1]->leaf.get_minimizer_index();
+						ind[3] = node[0]->leaf.get_minimizer_index();
 					}
 					else {
-						ind[0] = getMinimizerIndex((LeafNode *)(node[0]));
-						ind[1] = getMinimizerIndex((LeafNode *)(node[1]));
-						ind[2] = getMinimizerIndex((LeafNode *)(node[3]));
-						ind[3] = getMinimizerIndex((LeafNode *)(node[2]));
+						ind[0] = node[0]->leaf.get_minimizer_index();
+						ind[1] = node[1]->leaf.get_minimizer_index();
+						ind[2] = node[3]->leaf.get_minimizer_index();
+						ind[3] = node[2]->leaf.get_minimizer_index();
 					}
 
 					add_quad(output_mesh, ind);
@@ -2369,8 +2254,7 @@ void Octree::processEdgeWrite(Node *node[4], int depth[4], int maxdep, int dir)
 	}
 }
 
-
-void Octree::edgeProcContour(Node *node[4], int leaf[4], int depth[4], int maxdep, int dir)
+void Octree::edgeProcContour(const Node *node[4], const int leaf[4], const int depth[4], int maxdep, int dir) const
 {
 	if (!(node[0] && node[1] && node[2] && node[3])) {
 		return;
@@ -2380,7 +2264,7 @@ void Octree::edgeProcContour(Node *node[4], int leaf[4], int depth[4], int maxde
 	}
 	else {
 		int i, j;
-		Node *chd[4][8];
+		const Node *chd[4][8];
 		for (j = 0; j < 4; j++) {
 			for (i = 0; i < 8; i++) {
 				chd[j][i] = ((!leaf[j]) && node[j]->internal.has_child(i)) ?
@@ -2390,7 +2274,7 @@ void Octree::edgeProcContour(Node *node[4], int leaf[4], int depth[4], int maxde
 		}
 
 		// 2 edge calls
-		Node *ne[4];
+		const Node *ne[4];
 		int le[4];
 		int de[4];
 		for (i = 0; i < 2; i++) {
@@ -2418,7 +2302,7 @@ void Octree::edgeProcContour(Node *node[4], int leaf[4], int depth[4], int maxde
 	}
 }
 
-void Octree::faceProcContour(Node *node[2], int leaf[2], int depth[2], int maxdep, int dir)
+void Octree::faceProcContour(const Node *node[2], const int leaf[2], const int depth[2], int maxdep, int dir) const
 {
 	if (!(node[0] && node[1])) {
 		return;
@@ -2427,7 +2311,7 @@ void Octree::faceProcContour(Node *node[2], int leaf[2], int depth[2], int maxde
 	if (!(leaf[0] && leaf[1])) {
 		int i, j;
 		// Fill children nodes
-		Node *chd[2][8];
+		const Node *chd[2][8];
 		for (j = 0; j < 2; j++) {
 			for (i = 0; i < 8; i++) {
 				chd[j][i] = ((!leaf[j]) && node[j]->internal.has_child(i)) ?
@@ -2437,7 +2321,7 @@ void Octree::faceProcContour(Node *node[2], int leaf[2], int depth[2], int maxde
 		}
 
 		// 4 face calls
-		Node *nf[2];
+		const Node *nf[2];
 		int df[2];
 		int lf[2];
 		for (i = 0; i < 4; i++) {
@@ -2459,14 +2343,14 @@ void Octree::faceProcContour(Node *node[2], int leaf[2], int depth[2], int maxde
 
 		// 4 edge calls
 		int orders[2][4] = {{0, 0, 1, 1}, {0, 1, 0, 1}};
-		Node *ne[4];
+		const Node *ne[4];
 		int le[4];
 		int de[4];
 
 		for (i = 0; i < 4; i++) {
 			int c[4] = {faceProcEdgeMask[dir][i][1], faceProcEdgeMask[dir][i][2],
 				        faceProcEdgeMask[dir][i][3], faceProcEdgeMask[dir][i][4]};
-			int *order = orders[faceProcEdgeMask[dir][i][0]];
+			const int *order = orders[faceProcEdgeMask[dir][i][0]];
 
 			for (int j = 0; j < 4; j++) {
 				if (leaf[order[j]]) {
@@ -2487,7 +2371,7 @@ void Octree::faceProcContour(Node *node[2], int leaf[2], int depth[2], int maxde
 }
 
 
-void Octree::cellProcContour(Node *node, int leaf, int depth)
+void Octree::cellProcContour(const Node *node, int leaf, int depth) const
 {
 	if (node == NULL) {
 		return;
@@ -2497,7 +2381,7 @@ void Octree::cellProcContour(Node *node, int leaf, int depth)
 		int i;
 
 		// Fill children nodes
-		Node *chd[8];
+		const Node *chd[8];
 		for (i = 0; i < 8; i++) {
 			chd[i] = ((!leaf) && node->internal.has_child(i)) ?
 			         node->internal.get_child(node->internal.get_child_count(i)) : NULL;
@@ -2509,7 +2393,7 @@ void Octree::cellProcContour(Node *node, int leaf, int depth)
 		}
 
 		// 12 face calls
-		Node *nf[2];
+		const Node *nf[2];
 		int lf[2];
 		int df[2] = {depth - 1, depth - 1};
 		for (i = 0; i < 12; i++) {
@@ -2525,7 +2409,7 @@ void Octree::cellProcContour(Node *node, int leaf, int depth)
 		}
 
 		// 6 edge calls
-		Node *ne[4];
+		const Node *ne[4];
 		int le[4];
 		int de[4] = {depth - 1, depth - 1, depth - 1, depth - 1};
 		for (i = 0; i < 6; i++) {
@@ -2549,7 +2433,7 @@ void Octree::processEdgeParity(LeafNode *node[4], int depth[4], int maxdep, int 
 		// Minimal cell
 		// if(op == 0)
 		{
-			if (getEdgeParity(node[i], processEdgeMask[dir][i])) {
+			if (node[i]->get_edge_parity(processEdgeMask[dir][i])) {
 				con = 1;
 				break;
 			}
@@ -2558,7 +2442,7 @@ void Octree::processEdgeParity(LeafNode *node[4], int depth[4], int maxdep, int 
 
 	if (con == 1) {
 		for (int i = 0; i < 4; i++) {
-			setEdge(node[i], processEdgeMask[dir][i]);
+			node[i]->set_edge(processEdgeMask[dir][i]);
 		}
 	}
 

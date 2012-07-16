@@ -106,7 +106,7 @@ struct InternalNode {
 	{
 		return childrenCountTable[has_child_bitfield][index];
 	}
-	int get_child_index(int count)
+	int get_child_index(int count) const
 	{
 		return childrenIndexTable[has_child_bitfield][count];
 	}
@@ -177,6 +177,115 @@ struct LeafNode /* TODO: remove this attribute once everything is fixed */ {
 	unsigned short flood_fill;
 
 	float edge_intersections[0];
+
+	/// Retrieve signs
+	int get_sign(int index) const
+	{
+		return ((signs >> index) & 1);
+	}
+
+	/// Set sign
+	void set_sign(int index)
+	{
+		signs |= (1 << index);
+	}
+
+	void set_sign(int index, int sign)
+	{
+		signs &= (~(1 << index));
+		signs |= ((sign & 1) << index);
+	}
+
+	int get_sign_mask() const
+	{
+		return signs;
+	}
+
+	/// Set minimizer index
+	void set_minimizer_index(int index)
+	{
+		minimizer_index = index;
+	}
+
+	/// Get minimizer index
+	int get_minimizer_index() const
+	{
+		return minimizer_index;
+	}
+
+	/// Retrieve edge intersection
+	float get_edge_offset(int count) const
+	{
+		return edge_intersections[4 * count];
+	}
+
+	/// Set edge intersection
+	void set_edge_offset_normal(float pt, float a, float b, float c, int count)
+	{
+		edge_intersections[4 * count] = pt;
+		edge_intersections[4 * count + 1] = a;
+		edge_intersections[4 * count + 2] = b;
+		edge_intersections[4 * count + 3] = c;
+	}
+
+	float get_edge_offset_normal(int count, float& a, float& b, float& c) const
+	{
+		const float *pts = edge_intersections;
+		a = pts[4 * count + 1];
+		b = pts[4 * count + 2];
+		c = pts[4 * count + 3];
+		return pts[4 * count];
+	}
+
+	/// Set multiple edge intersections
+	void set_edge_offset_normals(const float pt[],
+								 const float a[],
+								 const float b[],
+								 const float c[], int len)
+	{
+		float *pts = edge_intersections;
+		for (int i = 0; i < len; i++) {
+			if (pt[i] > 1 || pt[i] < 0) {
+				printf("\noffset: %f\n", pt[i]);
+			}
+			pts[i * 4] = pt[i];
+			pts[i * 4 + 1] = a[i];
+			pts[i * 4 + 2] = b[i];
+			pts[i * 4 + 3] = c[i];
+		}
+	}
+	
+	/// Get edge parity
+	int get_edge_parity(int index) const
+	{
+		assert(index >= 0 && index <= 11);
+
+		return (edge_parity >> index) & 1;
+	}
+
+	/// Set edge parity
+	void flip_edge(int index)
+	{
+		assert(index >= 0 && index <= 11);
+
+		edge_parity ^= (1 << index);
+	}
+
+	/// Set 1
+	void set_edge(int index)
+	{
+		assert(index >= 0 && index <= 11);
+
+		edge_parity |= (1 << index);
+	}
+
+	/// Set 0
+	void reset_edge(int index)
+	{
+		assert(index >= 0 && index <= 11);
+
+		edge_parity &= ~(1 << index);
+	}
 };
 
 /* Doesn't get directly allocated anywhere, just used for passing
@@ -336,7 +445,7 @@ class Octree
 	 * Add triangles to the tree
 	 */
 	void addAllTriangles();
-	void addTriangle(Triangle *trian, int triind);
+	void addTriangle(const float v1[3], const float v2[3], const float v3[3]);
 	InternalNode *addTriangle(InternalNode *node, CubeTriangleIsect *p, int height);
 
 	/**
@@ -428,10 +537,10 @@ class Octree
 	 * Traversal functions to generate polygon model
 	 * op: 0 for counting, 1 for writing OBJ, 2 for writing OFF, 3 for writing PLY
 	 */
-	void cellProcContour(Node *node, int leaf, int depth);
-	void faceProcContour(Node * node[2], int leaf[2], int depth[2], int maxdep, int dir);
-	void edgeProcContour(Node * node[4], int leaf[4], int depth[4], int maxdep, int dir);
-	void processEdgeWrite(Node * node[4], int depths[4], int maxdep, int dir);
+	void cellProcContour(const Node *node, int leaf, int depth) const;
+	void faceProcContour(const Node *node[2], const int leaf[2], const int depth[2], int maxdep, int dir) const;
+	void edgeProcContour(const Node *node[4], const int leaf[4], const int depth[4], int maxdep, int dir) const;
+	void processEdgeWrite(const Node *node[4], const int depths[4], int maxdep, int dir) const;
 
 	/* output callbacks/data */
 	DualConAllocOutput alloc_output;
@@ -471,10 +580,10 @@ class Octree
 		}
 	}
 
-	int getSign(Node *node, int height, int index)
+	int getSign(const Node *node, int height, int index) const
 	{
 		if (height == 0) {
-			return getSign(&node->leaf, index);
+			return node->leaf.get_sign(index);
 		}
 		else {
 			if (node->internal.has_child(index)) {
@@ -508,7 +617,7 @@ class Octree
 		  printf("Edge mask: ");
 		  for(int i = 0; i < 12; i ++)
 		  {
-		  printf("%d ", getEdgeParity(leaf, i));
+		  printf("%d ", get_edge_parity(leaf, i));
 		  }
 		  printf("\n");
 		  printf("Stored edge mask: ");
@@ -520,33 +629,10 @@ class Octree
 		*/
 		printf("Sign mask: ");
 		for (int i = 0; i < 8; i++) {
-			printf("%d ", getSign(leaf, i));
+			printf("%d ", leaf->get_sign(i));
 		}
 		printf("\n");
 
-	}
-
-	/// Retrieve signs
-	int getSign(const LeafNode *leaf, int index)
-	{
-		return ((leaf->signs >> index) & 1);
-	}
-
-	/// Set sign
-	void setSign(LeafNode *leaf, int index)
-	{
-		leaf->signs |= (1 << index);
-	}
-
-	void setSign(LeafNode *leaf, int index, int sign)
-	{
-		leaf->signs &= (~(1 << index));
-		leaf->signs |= ((sign & 1) << index);
-	}
-
-	int getSignMask(const LeafNode *leaf) const
-	{
-		return leaf->signs;
 	}
 
 	void setInProcessAll(int st[3], int dir)
@@ -575,7 +661,7 @@ class Octree
 			eind = dirEdge[dir][i];
 
 			LeafNode *cell = locateLeaf(nst);
-			flipEdge(cell, eind);
+			cell->flip_edge(eind);
 		}
 	}
 
@@ -610,54 +696,22 @@ class Octree
 		}
 	}
 
-	/// Get edge parity
-	int getEdgeParity(const LeafNode *leaf, int index) const
-	{
-		assert(index >= 0 && index <= 11);
-
-		return (leaf->edge_parity >> index) & 1;
-	}
-
 	/// Get edge parity on a face
 	int getFaceParity(LeafNode *leaf, int index)
 	{
-		int a = getEdgeParity(leaf, faceMap[index][0]) +
-	        getEdgeParity(leaf, faceMap[index][1]) +
-	        getEdgeParity(leaf, faceMap[index][2]) +
-	        getEdgeParity(leaf, faceMap[index][3]);
+		int a = leaf->get_edge_parity(faceMap[index][0]) +
+	        leaf->get_edge_parity(faceMap[index][1]) +
+	        leaf->get_edge_parity(faceMap[index][2]) +
+	        leaf->get_edge_parity(faceMap[index][3]);
 		return (a & 1);
 	}
 	int getFaceEdgeNum(LeafNode *leaf, int index)
 	{
-		int a = getEdgeParity(leaf, faceMap[index][0]) +
-	        getEdgeParity(leaf, faceMap[index][1]) +
-	        getEdgeParity(leaf, faceMap[index][2]) +
-	        getEdgeParity(leaf, faceMap[index][3]);
+		int a = leaf->get_edge_parity(faceMap[index][0]) +
+	        leaf->get_edge_parity(faceMap[index][1]) +
+	        leaf->get_edge_parity(faceMap[index][2]) +
+	        leaf->get_edge_parity(faceMap[index][3]);
 		return a;
-	}
-
-	/// Set edge parity
-	void flipEdge(LeafNode *leaf, int index)
-	{
-		assert(index >= 0 && index <= 11);
-
-		leaf->edge_parity ^= (1 << index);
-	}
-
-	/// Set 1
-	void setEdge(LeafNode *leaf, int index)
-	{
-		assert(index >= 0 && index <= 11);
-
-		leaf->edge_parity |= (1 << index);
-	}
-
-	/// Set 0
-	void resetEdge(LeafNode *leaf, int index)
-	{
-		assert(index >= 0 && index <= 11);
-
-		leaf->edge_parity &= ~(1 << index);
 	}
 
 	/// Flipping with a new intersection offset
@@ -682,11 +736,11 @@ class Octree
 
 	LeafNode *flipEdge(LeafNode *leaf, int index, float alpha)
 	{
-		flipEdge(leaf, index);
+		leaf->flip_edge(index);
 
 		if ((index & 3) == 0) {
 			int ind = index / 4;
-			if (getEdgeParity(leaf, index) && !getStoredEdgesParity(leaf, ind)) {
+			if (leaf->get_edge_parity(index) && !getStoredEdgesParity(leaf, ind)) {
 				// Create a new node
 				int num = getNumEdges(leaf) + 1;
 				setStoredEdgesParity(leaf, ind);
@@ -759,7 +813,7 @@ class Octree
 		}
 
 		if (leaf && getStoredEdgesParity(leaf, index)) {
-			float off = getEdgeOffset(leaf, getEdgeCount(leaf, index));
+			float off = leaf->get_edge_offset(getEdgeCount(leaf, index));
 			pt[0] = (float) st[0];
 			pt[1] = (float) st[1];
 			pt[2] = (float) st[2];
@@ -819,12 +873,6 @@ class Octree
 		}
 	}
 
-	/// Retrieve edge intersection
-	float getEdgeOffset(const LeafNode *leaf, int count) const
-	{
-		return leaf->edge_intersections[4 * count];
-	}
-
 	/// Update method
 	LeafNode *updateEdgeOffsets(LeafNode *leaf, int oldlen, int newlen, float offs[3])
 	{
@@ -841,71 +889,22 @@ class Octree
 		return nleaf;
 	}
 
-	/// Set minimizer index
-	void setMinimizerIndex(LeafNode *leaf, int index)
+	int getMinimizerIndex(LeafNode *leaf, int eind) const
 	{
-		leaf->minimizer_index = index;
-	}
-
-	/// Get minimizer index
-	int getMinimizerIndex(LeafNode *leaf)
-	{
-		return leaf->minimizer_index;
-	}
-
-	int getMinimizerIndex(LeafNode *leaf, int eind)
-	{
-		int add = manifold_table[getSignMask(leaf)].pairs[eind][0] - 1;
+		int add = manifold_table[leaf->get_sign_mask()].pairs[eind][0] - 1;
 		assert(add >= 0);
 		return leaf->minimizer_index + add;
 	}
 
-	void getMinimizerIndices(LeafNode *leaf, int eind, int inds[2])
+	void getMinimizerIndices(LeafNode *leaf, int eind, int inds[2]) const
 	{
-		const int *add = manifold_table[getSignMask(leaf)].pairs[eind];
+		const int *add = manifold_table[leaf->get_sign_mask()].pairs[eind];
 		inds[0] = leaf->minimizer_index + add[0] - 1;
 		if (add[0] == add[1]) {
 			inds[1] = -1;
 		}
 		else {
 			inds[1] = leaf->minimizer_index + add[1] - 1;
-		}
-	}
-
-
-	/// Set edge intersection
-	void setEdgeOffsetNormal(LeafNode *leaf, float pt, float a, float b, float c, int count)
-	{
-		float *pts = leaf->edge_intersections;
-		pts[4 * count] = pt;
-		pts[4 * count + 1] = a;
-		pts[4 * count + 2] = b;
-		pts[4 * count + 3] = c;
-	}
-
-	float getEdgeOffsetNormal(LeafNode *leaf, int count, float& a, float& b, float& c)
-	{
-		float *pts = leaf->edge_intersections;
-		a = pts[4 * count + 1];
-		b = pts[4 * count + 2];
-		c = pts[4 * count + 3];
-		return pts[4 * count];
-	}
-
-	/// Set multiple edge intersections
-	void setEdgeOffsetsNormals(LeafNode *leaf, const float pt[],
-							   const float a[], const float b[],
-							   const float c[], int len)
-	{
-		float *pts = leaf->edge_intersections;
-		for (int i = 0; i < len; i++) {
-			if (pt[i] > 1 || pt[i] < 0) {
-				printf("\noffset: %f\n", pt[i]);
-			}
-			pts[i * 4] = pt[i];
-			pts[i * 4 + 1] = a[i];
-			pts[i * 4 + 2] = b[i];
-			pts[i * 4 + 3] = c[i];
 		}
 	}
 
@@ -951,7 +950,7 @@ class Octree
 		// The three primal edges are easy
 		int pmask[3] = {0, 4, 8};
 		for (i = 0; i < 3; i++) {
-			if (getEdgeParity(leaf, pmask[i])) {
+			if (leaf->get_edge_parity(pmask[i])) {
 				// getEdgeIntersectionByIndex(leaf, i, stt, 1, pts[pmask[i]], norms[pmask[i]]);
 				getEdgeIntersectionByIndex(leaf, i, st, len, pts[pmask[i]], norms[pmask[i]]);
 			}
@@ -961,8 +960,8 @@ class Octree
 		int fmask[3][2] = {{6, 10}, {2, 9}, {1, 5}};
 		int femask[3][2] = {{1, 2}, {0, 2}, {0, 1}};
 		for (i = 0; i < 3; i++) {
-			int e1 = getEdgeParity(leaf, fmask[i][0]);
-			int e2 = getEdgeParity(leaf, fmask[i][1]);
+			int e1 = leaf->get_edge_parity(fmask[i][0]);
+			int e2 = leaf->get_edge_parity(fmask[i][1]);
 			if (e1 || e2) {
 				int nst[3] = {st[0], st[1], st[2]};
 				nst[i] += len;
@@ -985,7 +984,7 @@ class Octree
 		int emask[3] = {3, 7, 11};
 		int eemask[3] = {0, 1, 2};
 		for (i = 0; i < 3; i++) {
-			if (getEdgeParity(leaf, emask[i])) {
+			if (leaf->get_edge_parity(emask[i])) {
 				int nst[3] = {st[0] + len, st[1] + len, st[2] + len};
 				nst[i] -= len;
 				// int nstt[3] = {1, 1, 1};
@@ -1053,7 +1052,7 @@ class Octree
 		int emask[3] = {3, 7, 11};
 		int eemask[3] = {0, 1, 2};
 		for (i = 0; i < 3; i++) {
-			//			if(getEdgeParity(leaf, emask[i]))
+			//			if(leaf->get_edge_parity(emask[i]))
 			{
 				int nst[3] = {st[0] + len, st[1] + len, st[2] + len};
 				nst[i] -= len;
@@ -1122,7 +1121,7 @@ class Octree
 		int emask[3] = {3, 7, 11};
 		int eemask[3] = {0, 1, 2};
 		for (i = 0; i < 3; i++) {
-			//			if(getEdgeParity(leaf, emask[i]))
+			//			if(leaf->get_edge_parity(emask[i]))
 			{
 				int nst[3] = {st[0] + len, st[1] + len, st[2] + len};
 				nst[i] -= len;
@@ -1150,7 +1149,7 @@ class Octree
 		*nleaf = *leaf;
 
 		// Next, fill in the offsets
-		setEdgeOffsetsNormals(nleaf, offs, a, b, c, newlen);
+		nleaf->set_edge_offset_normals(offs, a, b, c, newlen);
 
 		// Finally, delete the old leaf
 		removeLeaf(oldlen, leaf);

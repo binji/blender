@@ -49,7 +49,7 @@ class DualConInputReader : public ModelReader
 {
 private:
 const DualConInput *input_mesh;
-int tottri, curface, offset;
+int tottri;
 float min[3], max[3], maxsize;
 float scale;
 public:
@@ -62,8 +62,6 @@ DualConInputReader(const DualConInput *mesh, float _scale)
 void reset()
 {
 	tottri = 0;
-	curface = 0;
-	offset = 0;
 	maxsize = 0;
 
 	/* initialize tottri */
@@ -92,74 +90,37 @@ void reset()
 	maxsize *= 1 / scale;
 }
 
-Triangle *getNextTriangle()
+
+int getFace(int index, float co[4][3])
 {
-	if (curface == input_mesh->totface)
+	unsigned int *f;
+	int S;
+
+	if (index < 0 || index > input_mesh->totface)
 		return 0;
 
-	Triangle *t = new Triangle();
+	f = GET_FACE(input_mesh, index);
+	S = f[3] ? 4 : 3;
 
-	unsigned int *f = GET_FACE(input_mesh, curface);
-	if (offset == 0) {
-		veccopy(t->vt[0], GET_CO(input_mesh, f[0]));
-		veccopy(t->vt[1], GET_CO(input_mesh, f[1]));
-		veccopy(t->vt[2], GET_CO(input_mesh, f[2]));
-	}
-	else {
-		veccopy(t->vt[0], GET_CO(input_mesh, f[2]));
-		veccopy(t->vt[1], GET_CO(input_mesh, f[3]));
-		veccopy(t->vt[2], GET_CO(input_mesh, f[0]));
-	}
-
-	if (offset == 0 && f[3])
-		offset++;
-	else {
-		offset = 0;
-		curface++;
-	}
+	veccopy(co[0], GET_CO(input_mesh, f[0]));
+	veccopy(co[1], GET_CO(input_mesh, f[1]));
+	veccopy(co[2], GET_CO(input_mesh, f[2]));
+	if (f[3])
+		veccopy(co[3], GET_CO(input_mesh, f[3]));
 
 	/* remove triangle if it contains invalid coords */
-	for (int i = 0; i < 3; i++) {
-		const float *co = t->vt[i];
-		if (isnan(co[0]) || isnan(co[1]) || isnan(co[2])) {
-			delete t;
-			return getNextTriangle();
+	for (int i = 0; i < S; i++) {
+		if (isnan(co[i][0]) || isnan(co[i][1]) || isnan(co[i][2])) {
+			return 0;
 		}
 	}
 
-	return t;
+	return S;
 }
 
-int getNextTriangle(int t[3])
+int getNumFaces()
 {
-	if (curface == input_mesh->totface)
-		return 0;
-
-	unsigned int *f = GET_FACE(input_mesh, curface);
-	if (offset == 0) {
-		t[0] = f[0];
-		t[1] = f[1];
-		t[2] = f[2];
-	}
-	else {
-		t[0] = f[2];
-		t[1] = f[3];
-		t[2] = f[0];
-	}
-
-	if (offset == 0 && f[3])
-		offset++;
-	else {
-		offset = 0;
-		curface++;
-	}
-
-	return 1;
-}
-
-int getNumTriangles()
-{
-	return tottri;
+	return input_mesh->totface;
 }
 
 int getNumVertices()

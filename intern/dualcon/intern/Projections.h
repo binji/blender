@@ -72,7 +72,6 @@ struct TriangleProjection {
 	double norm[3];
 
 	/// Index of polygon
-	int index;
 };
 
 /* This is a projection for the cube against a single projection
@@ -102,7 +101,7 @@ public:
 	/**
 	 * Construction from a cube (axes aligned) and triangle
 	 */
-	CubeTriangleIsect(int64_t cube[2][3], int64_t trig[3][3], int64_t error, int triind);
+	CubeTriangleIsect(int64_t cube[2][3], int64_t trig[3][3], int64_t error);
 	
 	/**
 	 * Construction from a parent CubeTriangleIsect object and the index of

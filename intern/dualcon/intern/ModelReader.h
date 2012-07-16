@@ -38,14 +38,13 @@ ModelReader(){
 };
 
 /// Get next triangle
-virtual Triangle *getNextTriangle( ) = 0;
-virtual int getNextTriangle(int t[3]) = 0;
+virtual int getFace(int index, float co[4][3]) = 0;
 
 /// Get bounding box
 virtual float getBoundingBox(float origin[3]) = 0;
 
-/// Get number of triangles
-virtual int getNumTriangles( ) = 0;
+/// Get number of faces (can be either quads or triangles)
+virtual int getNumFaces( ) = 0;
 
 /// Get storage size
 virtual int getMemory( ) = 0;
