@@ -176,6 +176,9 @@ struct LeafNode /* TODO: remove this attribute once everything is fixed */ {
 
 	unsigned short flood_fill;
 
+	/* XXX: might not need to store this, doing for OpenMP tests */
+	float co[3];
+
 	float edge_intersections[0];
 
 	/// Retrieve signs
@@ -341,8 +344,8 @@ class Octree
 	/* Public members */
 
 	/// Memory allocators
-	VirtualMemoryAllocator *alloc[9];
-	VirtualMemoryAllocator *leafalloc[4];
+	//VirtualMemoryAllocator *alloc[9];
+	//VirtualMemoryAllocator *leafalloc[4];
 
 	/// Root node
 	Node *root;
@@ -413,6 +416,7 @@ class Octree
 
  private:
 	/* Helper functions */
+	void print_octree(Node *node, int height, bool is_leaf);
 
 	/**
 	 * Initialize memory allocators
@@ -445,7 +449,8 @@ class Octree
 	 * Add triangles to the tree
 	 */
 	void addAllTriangles();
-	void addTriangle(const float v1[3], const float v2[3], const float v3[3]);
+	void addAllTrianglesOMP();
+	Node *addTriangle(Node *node, const float v1[3], const float v2[3], const float v3[3], int depth, int octant);
 	InternalNode *addTriangle(InternalNode *node, CubeTriangleIsect *p, int height);
 
 	/**
@@ -530,9 +535,11 @@ class Octree
 	void writeOut();
 
 	void countIntersection(Node *node, int height, int& nedge, int& ncell, int& nface);
-	void generateMinimizer(Node * node, int st[3], int len, int height, int& offset);
+	void generateMinimizer(Node * node, int st[3], int len, int height);
 	void computeMinimizer(const LeafNode * leaf, int st[3], int len,
 						  float rvalue[3]) const;
+	void outputVertices(Node *node, int height, int &offset);
+
 	/**
 	 * Traversal functions to generate polygon model
 	 * op: 0 for counting, 1 for writing OBJ, 2 for writing OFF, 3 for writing PLY
@@ -889,14 +896,7 @@ class Octree
 		return nleaf;
 	}
 
-	int getMinimizerIndex(LeafNode *leaf, int eind) const
-	{
-		int add = manifold_table[leaf->get_sign_mask()].pairs[eind][0] - 1;
-		assert(add >= 0);
-		return leaf->minimizer_index + add;
-	}
-
-	void getMinimizerIndices(LeafNode *leaf, int eind, int inds[2]) const
+	void getMinimizerIndices(const LeafNode *leaf, int eind, int inds[2]) const
 	{
 		const int *add = manifold_table[leaf->get_sign_mask()].pairs[eind];
 		inds[0] = leaf->minimizer_index + add[0] - 1;
@@ -1268,7 +1268,6 @@ class Octree
 
 	/************ Operators for internal nodes ************/
 
-
 	/// Add a kid to an existing internal node
 	InternalNode *addChild(InternalNode *node, int index, Node *child, int aLeaf)
 	{
@@ -1308,7 +1307,8 @@ class Octree
 	/// Allocate a node
 	InternalNode *createInternal(int length)
 	{
-		InternalNode *inode = (InternalNode *)alloc[length]->allocate();
+		//InternalNode *inode = (InternalNode *)alloc[length]->allocate();
+		InternalNode *inode = (InternalNode*)malloc(sizeof(InternalNode) + (sizeof(Node*) * length));
 		inode->has_child_bitfield = 0;
 		inode->child_is_leaf_bitfield = 0;
 		return inode;
@@ -1318,7 +1318,8 @@ class Octree
 	{
 		assert(length <= 3);
 
-		LeafNode *lnode = (LeafNode *)leafalloc[length]->allocate();
+		//LeafNode *lnode = (LeafNode *)leafalloc[length]->allocate();
+		LeafNode *lnode = (LeafNode*)malloc(sizeof(LeafNode) + sizeof(float) * EDGE_FLOATS * length);
 		lnode->edge_parity = 0;
 		lnode->primary_edge_intersections = 0;
 		lnode->signs = 0;
@@ -1328,13 +1329,15 @@ class Octree
 
 	void removeInternal(int num, InternalNode *node)
 	{
-		alloc[num]->deallocate(node);
+		//alloc[num]->deallocate(node);
+		free(node);
 	}
 
 	void removeLeaf(int num, LeafNode *leaf)
 	{
 		assert(num >= 0 && num <= 3);
-		leafalloc[num]->deallocate(leaf);
+		//leafalloc[num]->deallocate(leaf);
+		free(leaf);
 	}
 
 	/// Add a leaf (by creating a new par node with the leaf added)

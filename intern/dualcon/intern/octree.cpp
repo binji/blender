@@ -25,6 +25,8 @@
 #include <limits>
 #include <time.h>
 
+#include <omp.h>
+
 /**
  * Implementations of Octree member functions.
  *
@@ -107,38 +109,51 @@ Octree::~Octree()
 
 void Octree::scanConvert()
 {
+	double start, end;
+
 	// Scan triangles
+	start = omp_get_wtime();
 	addAllTriangles();
+	end = omp_get_wtime();
+	printf("addAllTriangles: %f seconds\n", end - start);
+
+	start = omp_get_wtime();
 	resetMinimalEdges();
+	end = omp_get_wtime();
+	printf("resetMinimalEdges: %f seconds\n", end - start);
+
+	start = omp_get_wtime();
 	preparePrimalEdgesMask(&root->internal);
+	end = omp_get_wtime();
+	printf("preparePrimalEdgesMask: %f seconds\n", end - start);
 
 	// Generate signs
 	// Find holes
+	start = omp_get_wtime();
 	trace();
-	dc_printf("Holes: %d Average Length: %f Max Length: %d \n", numRings, (float)totRingLengths / (float) numRings, maxRingLength);
+	end = omp_get_wtime();
+	printf("trace: %f seconds\n", end - start);
 
-	// Check again
-	int tnumRings = numRings;
-	//trace();
-	dc_printf("Holes after patching: %d \n", numRings);
-	numRings = tnumRings;
-
+	start = omp_get_wtime();
 	buildSigns();
+	end = omp_get_wtime();
+	printf("buildSigns: %f seconds\n", end - start);
 
 	if (use_flood_fill) {
 		floodFill();
 		buildSigns();
-		//	dc_printf("Checking...\n");
-		//	floodFill();
 	}
 
 	// Output
+	start = omp_get_wtime();
 	writeOut();
+	end = omp_get_wtime();
+	printf("writeOut: %f seconds\n", end - start);
 }
 
 void Octree::initMemory()
 {
-	leafalloc[0] = new MemoryAllocator<sizeof(LeafNode)>();
+	/*leafalloc[0] = new MemoryAllocator<sizeof(LeafNode)>();
 	leafalloc[1] = new MemoryAllocator<sizeof(LeafNode) + sizeof(float) *EDGE_FLOATS>();
 	leafalloc[2] = new MemoryAllocator<sizeof(LeafNode) + sizeof(float) *EDGE_FLOATS * 2>();
 	leafalloc[3] = new MemoryAllocator<sizeof(LeafNode) + sizeof(float) *EDGE_FLOATS * 3>();
@@ -151,12 +166,12 @@ void Octree::initMemory()
 	alloc[5] = new MemoryAllocator<sizeof(InternalNode) + sizeof(Node *) * 5>();
 	alloc[6] = new MemoryAllocator<sizeof(InternalNode) + sizeof(Node *) * 6>();
 	alloc[7] = new MemoryAllocator<sizeof(InternalNode) + sizeof(Node *) * 7>();
-	alloc[8] = new MemoryAllocator<sizeof(InternalNode) + sizeof(Node *) * 8>();
+	alloc[8] = new MemoryAllocator<sizeof(InternalNode) + sizeof(Node *) * 8>();*/
 }
 
 void Octree::freeMemory()
 {
-	for (int i = 0; i < 9; i++) {
+	/*for (int i = 0; i < 9; i++) {
 		alloc[i]->destroy();
 		delete alloc[i];
 	}
@@ -164,12 +179,12 @@ void Octree::freeMemory()
 	for (int i = 0; i < 4; i++) {
 		leafalloc[i]->destroy();
 		delete leafalloc[i];
-	}
+		}*/
 }
 
 void Octree::printMemUsage()
 {
-	int totalbytes = 0;
+	/*int totalbytes = 0;
 	dc_printf("********* Internal nodes: \n");
 	for (int i = 0; i < 9; i++) {
 		alloc[i]->printInfo();
@@ -186,7 +201,7 @@ void Octree::printMemUsage()
 	}
 
 	dc_printf("Total allocated bytes on disk: %d \n", totalbytes);
-	dc_printf("Total leaf nodes: %d\n", totalLeafs);
+	dc_printf("Total leaf nodes: %d\n", totalLeafs);*/
 }
 
 void Octree::resetMinimalEdges()
@@ -194,24 +209,142 @@ void Octree::resetMinimalEdges()
 	cellProcParity(root, 0, maxDepth);
 }
 
+static void veccopy(float dst[3], const float src[3])
+{
+	dst[0] = src[0];
+	dst[1] = src[1];
+	dst[2] = src[2];
+}
+
 void Octree::addAllTriangles()
 {
 	const int num_faces = reader->getNumFaces();
+	bool use_omp = false;
 
-	for (int i = 0; i < num_faces; i++) {
-		float co[4][3];
-		int S = reader->getFace(i, co);
+	#ifdef _OPENMP
+	/* By forcing at least three levels, we know the top two levels
+	   can be all internal nodes */
+	use_omp = maxDepth > 2;
+	#endif
 
-		if (S >= 3)
-			addTriangle(co[0], co[1], co[2]);
-		if (S == 4)
-			addTriangle(co[2], co[3], co[0]);
+	if (use_omp) {
+		addAllTrianglesOMP();
 	}
+	else {
+		int i;
+		for (i = 0; i < num_faces; i++) {
+			float co[4][3];
+			int S = reader->getFace(i, co);
+
+			if (S >= 3)
+				root = addTriangle(root, co[0], co[1], co[2], maxDepth, -1);
+			if (S == 4)
+				root = addTriangle(root, co[2], co[3], co[0], maxDepth, -1);
+		}
+	}
+}
+
+static void print_depth(int height, int maxDepth)
+{
+	for (int i = 0; i < maxDepth - height; i++)
+		printf("  ");
+}
+
+void Octree::print_octree(Node *node, int height, bool is_leaf)
+{
+	print_depth(height, maxDepth);
+	printf("node=%p\n", node);
+
+	if (!is_leaf) {
+		Node *children[8];
+		int is_leaf[8];
+		int i;
+
+		node->internal.fill_children(children, is_leaf);
+		for (i = 0; i < 8; i++) {
+			print_depth(height, maxDepth);
+			printf("%d:\n", i);
+			if (children[i])
+				print_octree(children[i], height - 1, is_leaf[i]);
+		}
+	}
+}
+
+void Octree::addAllTrianglesOMP()
+{
+	int num_faces = reader->getNumFaces();
+	int octant;
+
+	/* Create eight fake roots, internal nodes that are octants of the
+	 * real root. These nodes can be built individually be different
+	 * threads, then assigned to the real root at the end.
+	 *
+	 * Notes: this doesn't really guarantee the work will be well
+	 * balanced between all threads, since it depends on the whether
+	 * the input triangles are split evenly between the octants. Not
+	 * sure how to improve that. Also, can only take advantage of
+	 * eight threads.
+	 *
+	 * This approach does cause the triangle projection to be
+	 * calculated multiple times, but profiling shows this is
+	 * insignificant.
+	 */
+
+	Node *fake_roots[8];
+	for (octant = 0; octant < 8; octant++)
+		fake_roots[octant] = (Node*)createInternal(0);
+
+	#pragma omp parallel for
+	for (octant = 0; octant < 8; octant++) {
+		int i;
+		for (i = 0; i < num_faces; i++) {
+			float co[4][3];
+			int S = reader->getFace(i, co);
+
+			if (S >= 3)
+				fake_roots[octant] = addTriangle(fake_roots[octant], co[0], co[1], co[2], maxDepth - 1, octant);
+			if (S == 4)
+				fake_roots[octant] = addTriangle(fake_roots[octant], co[2], co[3], co[0], maxDepth - 1, octant);
+		}
+	}
+
+	/* Count how many fake roots actually got used */
+	int num_children = 0;
+	for (octant = 0; octant < 8; octant++) {
+		if (fake_roots[octant]->internal.get_num_children())
+			num_children++;
+	}
+
+	/* Allocate root */
+	root = (Node*)createInternal(num_children);
+
+	/* Add children */
+	int count = 0;
+	for (octant = 0; octant < 8; octant++) {
+		if (fake_roots[octant]->internal.get_num_children()) {
+			root->internal.set_internal_child(octant, count, &fake_roots[octant]->internal);
+			count++;
+		}
+	}
+}
+
+static void set_cube(int64_t cube[2][3],
+					 int64_t min1, int64_t min2, int64_t min3,
+					 int64_t max1, int64_t max2, int64_t max3)
+{
+	cube[0][0] = min1;
+	cube[0][1] = min2;
+	cube[0][2] = min3;
+
+	cube[1][0] = max1;
+	cube[1][1] = max2;
+	cube[1][2] = max3;
 }
 
 /* Prepare a triangle for insertion into the octree; call the other
    addTriangle() to (recursively) build the octree */
-void Octree::addTriangle(const float v1[3], const float v2[3], const float v3[3])
+Node *Octree::addTriangle(Node *node, const float v1[3], const float v2[3],
+						  const float v3[3], int depth, int octant)
 {
 	int i;
 
@@ -225,20 +358,34 @@ void Octree::addTriangle(const float v1[3], const float v2[3], const float v3[3]
 
 	/* Generate projections */
 	int64_t cube[2][3] = {{0, 0, 0}, {dimen, dimen, dimen}};
-
+	int64_t half = dimen >> 1;
+	if (octant == 0)
+		set_cube(cube, 0, 0, 0, half, half, half);
+	else if (octant == 1)
+		set_cube(cube, 0, 0, half, half, half, dimen);
+	else if (octant == 2)
+		set_cube(cube, 0, half, 0, half, dimen, half);
+	else if (octant == 3)
+		set_cube(cube, 0, half, half, half, dimen, dimen);
+	else if (octant == 4)
+		set_cube(cube, half, 0, 0, dimen, half, half);
+	else if (octant == 5)
+		set_cube(cube, half, 0, half, dimen, half, dimen);
+	else if (octant == 6)
+		set_cube(cube, half, half, 0, dimen, dimen, half);
+	else if (octant == 7)
+		set_cube(cube, half, half, half, dimen, dimen, dimen);
+	
 	/* Add triangle to the octree */
 	int64_t errorvec = (int64_t)(0);
 	CubeTriangleIsect *proj = new CubeTriangleIsect(cube, trig, errorvec);
-	root = (Node *)addTriangle(&root->internal, proj, maxDepth);
+
+	node = (Node *)addTriangle(&node->internal, proj, depth);
 
 	delete proj->inherit;
 	delete proj;
-}
 
-void print_depth(int height, int maxDepth)
-{
-	for (int i = 0; i < maxDepth - height; i++)
-		printf("  ");
+	return node;
 }
 
 InternalNode *Octree::addTriangle(InternalNode *node, CubeTriangleIsect *p, int height)
@@ -819,7 +966,7 @@ Node *Octree::patch(Node *newnode, int st[3], int len, PathList *rings)
 
 	/* Pass onto separate calls in each direction */
 	if (len == mindimen) {
-		dc_printf("Error! should have no list by now.\n");
+		printf("Error! should have no list by now.\n");
 		exit(0);
 	}
 
@@ -1937,8 +2084,20 @@ void Octree::writeOut()
 	actualVerts = 0;
 	actualQuads = 0;
 
-	generateMinimizer(root, st, dimen, maxDepth, offset);
+	double start, end;
+	start = omp_get_wtime();
+	generateMinimizer(root, st, dimen, maxDepth);
+	end = omp_get_wtime();
+	printf("minimizer: %f seconds\n", end - start);
+	start = omp_get_wtime();
+	outputVertices(root, maxDepth, offset);
+	end = omp_get_wtime();
+	printf("outputVertices: %f seconds\n", end - start);
+	start = omp_get_wtime();
 	cellProcContour(root, 0, maxDepth);
+	end = omp_get_wtime();
+	printf("cellProcContour: %f seconds\n", end - start);
+
 	dc_printf("Vertices written: %d Quads written: %d \n", offset, actualQuads);
 }
 
@@ -2131,27 +2290,11 @@ void Octree::computeMinimizer(const LeafNode *leaf, int st[3], int len,
 	}
 }
 
-void Octree::generateMinimizer(Node *node, int st[3], int len, int height, int& offset)
+void Octree::outputVertices(Node *node, int height, int &offset)
 {
 	int i, j;
 
 	if (height == 0) {
-		// Leaf cell, generate
-
-		// First, find minimizer
-		float rvalue[3];
-		rvalue[0] = (float) st[0] + len / 2;
-		rvalue[1] = (float) st[1] + len / 2;
-		rvalue[2] = (float) st[2] + len / 2;
-		computeMinimizer(&node->leaf, st, len, rvalue);
-
-		// Update
-		//float fnst[3];
-		for (j = 0; j < 3; j++) {
-			rvalue[j] = rvalue[j] * range / dimen + origin[j];
-			//fnst[j] = st[j] * range / dimen + origin[j];
-		}
-
 		int mult = 0, smask = node->leaf.get_sign_mask();
 
 		if (use_manifold) {
@@ -2164,31 +2307,73 @@ void Octree::generateMinimizer(Node *node, int st[3], int len, int height, int& 
 		}
 
 		for (j = 0; j < mult; j++) {
-			add_vert(output_mesh, rvalue);
+			add_vert(output_mesh, node->leaf.co);
 		}
 
 		// Store the index
 		node->leaf.set_minimizer_index(offset);
-
 		offset += mult;
 	}
 	else {
 		// Internal cell, recur
 		int count = 0;
-		len >>= 1;
-		for (i = 0; i < 8; i++) {
-			if (node->internal.has_child(i)) {
-				int nst[3];
-				nst[0] = st[0] + vertmap[i][0] * len;
-				nst[1] = st[1] + vertmap[i][1] * len;
-				nst[2] = st[2] + vertmap[i][2] * len;
 
-				generateMinimizer(node->internal.get_child(count),
-				                  nst, len, height - 1, offset);
+		for (i = 0; i < 8; i++) {
+ 			if (node->internal.has_child(i)) {
+				outputVertices(node->internal.get_child(count),
+							   height - 1, offset);
 				count++;
 			}
 		}
 	}
+}
+
+void Octree::generateMinimizer(Node *node, int st[3], int len, int height)
+{
+	int i, j;
+
+	if (height == 0) {
+		// Leaf cell, generate
+
+		// First, find minimizer
+		float rvalue[3];
+		computeMinimizer(&node->leaf, st, len, rvalue);
+
+		// Update
+		//float fnst[3];
+		for (j = 0; j < 3; j++) {
+			node->leaf.co[j] = rvalue[j] * range / dimen + origin[j];
+			//fnst[j] = st[j] * range / dimen + origin[j];
+		}
+	}
+	else {
+		// Internal cell, recur
+		len >>= 1;
+
+		/* Get all children (easier to parallelize) */
+		Node *children[8];
+		int is_leaf[8];
+		node->internal.fill_children(children, is_leaf);
+
+		//double start, finish;
+
+		#pragma omp parallel for if (height == maxDepth)// private(start, finish)
+		for (i = 0; i < 8; i++) {
+			//start = omp_get_wtime();
+			if (children[i]) {
+ 				int nst[3];
+ 				nst[0] = st[0] + vertmap[i][0] * len;
+ 				nst[1] = st[1] + vertmap[i][1] * len;
+ 				nst[2] = st[2] + vertmap[i][2] * len;
+ 
+				generateMinimizer(children[i], nst, len, height - 1);
+ 			}
+			//finish = omp_get_wtime();
+			if (height == maxDepth)
+				;//printf("%f seconds\n", finish - start);
+
+ 		}
+ 	}
 }
 
 void Octree::processEdgeWrite(const Node *node[4], const int depth[4], int maxdep, int dir) const
@@ -2204,10 +2389,10 @@ void Octree::processEdgeWrite(const Node *node[4], const int depth[4], int maxde
 				flip = 1;
 			}
 
-			int num = 0;
 			{
 				int ind[8];
 				if (use_manifold) {
+					/*int num = 0;
 					int vind[2];
 					int seq[4] = {0, 1, 3, 2};
 					for (int k = 0; k < 4; k++) {
@@ -2223,7 +2408,7 @@ void Octree::processEdgeWrite(const Node *node[4], const int depth[4], int maxde
 								ind[num - 2] = vind[1];
 							}
 						}
-					}
+						}*/
 
 					/* we don't use the manifold option, but if it is
 					   ever enabled again note that it can output
@@ -2243,7 +2428,10 @@ void Octree::processEdgeWrite(const Node *node[4], const int depth[4], int maxde
 						ind[3] = node[2]->leaf.get_minimizer_index();
 					}
 
-					add_quad(output_mesh, ind);
+					#pragma omp critical
+					{
+						add_quad(output_mesh, ind);
+					}
 				}
 			}
 			return;
@@ -2370,7 +2558,6 @@ void Octree::faceProcContour(const Node *node[2], const int leaf[2], const int d
 	}
 }
 
-
 void Octree::cellProcContour(const Node *node, int leaf, int depth) const
 {
 	if (node == NULL) {
@@ -2388,33 +2575,34 @@ void Octree::cellProcContour(const Node *node, int leaf, int depth) const
 		}
 
 		// 8 Cell calls
+		#pragma omp parallel for if (depth == maxDepth)
 		for (i = 0; i < 8; i++) {
 			cellProcContour(chd[i], node->internal.is_child_leaf(i), depth - 1);
 		}
 
 		// 12 face calls
-		const Node *nf[2];
-		int lf[2];
-		int df[2] = {depth - 1, depth - 1};
+		const int df[2] = {depth - 1, depth - 1};
+		//#pragma omp parallel for if (depth >= maxDepth - 1)
 		for (i = 0; i < 12; i++) {
 			int c[2] = {cellProcFaceMask[i][0], cellProcFaceMask[i][1]};
-
-			lf[0] = node->internal.is_child_leaf(c[0]);
-			lf[1] = node->internal.is_child_leaf(c[1]);
-
-			nf[0] = chd[c[0]];
-			nf[1] = chd[c[1]];
+			const Node *nf[2] = {chd[c[0]], chd[c[1]]};
+			const int lf[2] = {node->internal.is_child_leaf(c[0]),
+							   node->internal.is_child_leaf(c[1])};
 
 			faceProcContour(nf, lf, df, depth - 1, cellProcFaceMask[i][2]);
 		}
 
 		// 6 edge calls
-		const Node *ne[4];
-		int le[4];
-		int de[4] = {depth - 1, depth - 1, depth - 1, depth - 1};
+		const int de[4] = {depth - 1, depth - 1, depth - 1, depth - 1};
+		//#pragma omp parallel for if (depth >= maxDepth - 1)
 		for (i = 0; i < 6; i++) {
-			int c[4] = {cellProcEdgeMask[i][0], cellProcEdgeMask[i][1], cellProcEdgeMask[i][2], cellProcEdgeMask[i][3]};
+			const int c[4] = {cellProcEdgeMask[i][0],
+							  cellProcEdgeMask[i][1],
+							  cellProcEdgeMask[i][2],
+							  cellProcEdgeMask[i][3]};
 
+			const Node *ne[4];
+			int le[4];
 			for (int j = 0; j < 4; j++) {
 				le[j] = node->internal.is_child_leaf(c[j]);
 				ne[j] = chd[c[j]];
@@ -2423,7 +2611,6 @@ void Octree::cellProcContour(const Node *node, int leaf, int depth) const
 			edgeProcContour(ne, le, de, depth - 1, cellProcEdgeMask[i][4]);
 		}
 	}
-
 }
 
 void Octree::processEdgeParity(LeafNode *node[4], int depth[4], int maxdep, int dir)
@@ -2585,6 +2772,7 @@ void Octree::cellProcParity(Node *node, int leaf, int depth)
 		}
 
 		// 8 Cell calls
+		#pragma omp parallel for
 		for (i = 0; i < 8; i++) {
 			cellProcParity(chd[i], node->internal.is_child_leaf(i), depth - 1);
 		}
