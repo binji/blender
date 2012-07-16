@@ -145,6 +145,8 @@ static void dualcon_add_quad(void *output_v, const int vert_indices[4])
 	output->curface++;
 }
 
+#include <omp.h>
+
 static DerivedMesh *applyModifier(ModifierData *md,
                                   Object *UNUSED(ob),
                                   DerivedMesh *dm,
@@ -156,6 +158,9 @@ static DerivedMesh *applyModifier(ModifierData *md,
 	DerivedMesh *result;
 	DualConFlags flags = 0;
 	DualConMode mode = 0;
+
+	double start, end;
+	start = omp_get_wtime();
 
 	DM_ensure_tessface(dm); /* BMESH - UNTIL MODIFIER IS UPDATED FOR MPoly */
 
@@ -201,8 +206,19 @@ static DerivedMesh *applyModifier(ModifierData *md,
 		}
 	}
 
+	end = omp_get_wtime();
+	printf("MOD_remesh.c applyModifier time: %f seconds\n", end - start);
+
+	start = omp_get_wtime();
 	CDDM_calc_edges(result);
+	end = omp_get_wtime();
+	printf("MOD_remesh.c CDDM_calc_edges time: %f seconds\n", end - start);
+
+	start = omp_get_wtime();
 	CDDM_calc_normals(result);
+	end = omp_get_wtime();
+	printf("MOD_remesh.c CDDM_calc_normals time: %f seconds\n", end - start);
+
 	return result;
 }
 
