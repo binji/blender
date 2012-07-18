@@ -268,6 +268,12 @@ void free_sculptsession(Object *ob)
 		SculptSession *ss = ob->sculpt;
 		DerivedMesh *dm = ob->derivedFinal;
 
+		if (ss->bm) {
+			if (ob->data)
+				BM_mesh_bm_to_me(ss->bm, ob->data, FALSE);
+			BM_mesh_free(ss->bm);
+		}
+
 		if (ss->pbvh)
 			BLI_pbvh_free(ss->pbvh);
 		if (dm && dm->getPBVH)
