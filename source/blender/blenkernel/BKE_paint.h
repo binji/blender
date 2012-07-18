@@ -33,6 +33,7 @@
  */
 
 struct bContext;
+struct BMesh;
 struct Brush;
 struct MDisps;
 struct MeshElemMap;
@@ -91,6 +92,10 @@ typedef struct SculptSession {
 	
 	/* Mesh connectivity */
 	const struct MeshElemMap *pmap;
+
+	/* BMesh for dynamic topology sculpting */
+	struct BMesh *bm;
+	int bm_smooth_shading;
 
 	/* PBVH acceleration structure */
 	struct PBVH *pbvh;

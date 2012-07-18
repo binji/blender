@@ -866,6 +866,19 @@ class VIEW3D_PT_sculpt_options(Panel, View3DPaintPanel):
         toolsettings = context.tool_settings
         sculpt = toolsettings.sculpt
 
+        layout.label(text="Topology:")
+        if context.sculpt_object.use_dynamic_topology_sculpting:
+            layout.operator("sculpt.dynamic_topology_toggle", icon='X', text="Disable Dynamic")
+        else:
+            # XXX: temporarily reusing MOD_REMESH icon here
+            layout.operator("sculpt.dynamic_topology_toggle", icon='MOD_REMESH', text="Enable Dynamic")
+
+        col = layout.column()
+        col.prop(sculpt, "detail_size")
+        col.prop(sculpt, "use_smooth_shading")
+        col.prop(sculpt, "use_edge_collapse")
+        col.active = context.sculpt_object.use_dynamic_topology_sculpting
+
         layout.label(text="Lock:")
         row = layout.row(align=True)
         row.prop(sculpt, "lock_x", text="X", toggle=True)

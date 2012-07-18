@@ -804,7 +804,8 @@ typedef struct Sculpt {
 
 	float special_rotation;
 
-	int pad;
+	/* Maximum edge length for dynamic topology sculpting */
+	float detail_size;
 } Sculpt;
 
 typedef struct UvSculpt {
@@ -1442,6 +1443,14 @@ typedef enum SculptFlags {
 	SCULPT_SYMMETRY_FEATHER = (1<<6),
 	SCULPT_USE_OPENMP = (1<<7),
 	SCULPT_ONLY_DEFORM = (1<<8),
+
+	/* If set, the mesh will be drawn with smooth-shading in
+	   dynamic-topology mode */
+	SCULPT_DYNTOPO_SMOOTH_SHADING = (1<<9),
+
+	/* If set, dynamic-topology brushes will collapse short edges in
+	   addition to subdividing long ones */
+	SCULPT_DYNTOPO_COLLAPSE = (1<<10)
 } SculptFlags;
 
 /* ImagePaintSettings.flag */
