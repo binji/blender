@@ -99,6 +99,9 @@ typedef struct SculptUndoNode {
 	int *grids;                 /* to restore into right location */
 	BLI_bitmap *grid_hidden;
 
+	/* bmesh */
+	struct BMLogGroup *bm_group;
+
 	/* layer brush */
 	float *layer_disp;
 
