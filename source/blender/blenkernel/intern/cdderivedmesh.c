@@ -262,6 +262,16 @@ static PBVH *cdDM_getPBVH(Object *ob, DerivedMesh *dm)
 		cddm->pbvh_draw = can_pbvh_draw(ob, dm);
 	}
 
+	/* TODO */
+	if (!cddm->pbvh && ob->sculpt->bm) {
+		cddm->pbvh = BLI_pbvh_new();
+		cddm->pbvh_draw = TRUE;
+
+		BLI_pbvh_build_bmesh(cddm->pbvh, ob->sculpt->bm,
+							 ob->sculpt->bm_smooth_shading);
+	}
+		
+
 	/* always build pbvh from original mesh, and only use it for drawing if
 	 * this derivedmesh is just original mesh. it's the multires subsurf dm
 	 * that this is actually for, to support a pbvh on a modified mesh */
