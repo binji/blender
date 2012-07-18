@@ -2880,7 +2880,9 @@ static void sculpt_topology_update(Sculpt *sd, Object *ob, Brush *brush)
 	if (totnode) {
 		PBVHTopologyUpdateMode mode = PBVH_Subdivide;
 
-		if (sd->flags & SCULPT_DYNTOPO_COLLAPSE) {
+		if ((sd->flags & SCULPT_DYNTOPO_COLLAPSE) ||
+			(brush->sculpt_tool == SCULPT_TOOL_SIMPLIFY))
+		{
 			mode |= PBVH_Collapse;
 		}
 
@@ -3411,6 +3413,8 @@ static const char *sculpt_tool_name(Sculpt *sd)
 			return "Mask Brush";
 		case SCULPT_TOOL_ERASE:
 			return "Erase Brush";
+		case SCULPT_TOOL_SIMPLIFY:
+			return "Simplify Brush";
 	}
 
 	return "Sculpting";
@@ -4135,7 +4139,8 @@ static void sculpt_stroke_update_step(bContext *C, struct PaintStroke *stroke, P
 		do_symmetrical_brush_actions(sd, ob, sculpt_topology_update);
 	}
 
-	do_symmetrical_brush_actions(sd, ob, do_brush_action);
+	if (paint_brush(&sd->paint)->sculpt_tool != SCULPT_TOOL_SIMPLIFY)
+		do_symmetrical_brush_actions(sd, ob, do_brush_action);
 
 	sculpt_combine_proxies(sd, ob);
 
