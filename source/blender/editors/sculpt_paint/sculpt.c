@@ -4127,7 +4127,10 @@ static void sculpt_stroke_update_step(bContext *C, struct PaintStroke *stroke, P
 	sculpt_update_cache_variants(C, sd, ob, stroke, itemptr);
 	sculpt_restore_mesh(sd, ss);
 
-	BLI_pbvh_bmesh_detail_size_set(ss->pbvh, sd->detail_size);
+	BLI_pbvh_bmesh_detail_size_set(ss->pbvh,
+								   (ss->cache->radius /
+									(float)ss->cache->pixel_radius) *
+								   (float)sd->detail_size);
 	/* TODO */
 	if (ss->bm)
 		;//ss->cache->original = 0;
@@ -4540,7 +4543,7 @@ static int sculpt_toggle_mode(bContext *C, wmOperator *UNUSED(op))
 		}
 
 		if (!ts->sculpt->detail_size)
-			ts->sculpt->detail_size = 0.75;
+			ts->sculpt->detail_size = 30;
 
 		/* Create sculpt mode session data */
 		if (ob->sculpt)
