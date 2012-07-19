@@ -804,8 +804,8 @@ typedef struct Sculpt {
 
 	float special_rotation;
 
-	/* Maximum edge length for dynamic topology sculpting */
-	float detail_size;
+	/* Maximum edge length for dynamic topology sculpting (in pixels) */
+	int detail_size;
 } Sculpt;
 
 typedef struct UvSculpt {
