@@ -288,6 +288,34 @@ typedef struct StrokeCache {
 	rcti previous_r; /* previous redraw rectangle */
 } StrokeCache;
 
+/* Returns true if the stroke will use dynamic topology, false
+   otherwise.
+
+   Factors: some brushes like grab cannot do dynamic topology.
+   Others, like smooth, are better without. Same goes for alt-
+   key smoothing. */
+static int sculpt_stroke_dynamic_topology(const SculptSession *ss,
+										  const Brush *brush)
+{
+	return ((BLI_pbvh_type(ss->pbvh) == PBVH_BMESH) &&
+
+			(!ss->cache || (!ss->cache->alt_smooth)) &&
+
+			(!ELEM5(brush->sculpt_tool,
+					SCULPT_TOOL_GRAB,
+					SCULPT_TOOL_ROTATE,
+					SCULPT_TOOL_THUMB,
+
+					/* TODO: probably more... */
+
+					/* The smooth brush can technically can support
+					   dynamic topology, but user feedback indicates it's
+					   better not to */
+					SCULPT_TOOL_SMOOTH,
+					/* TODO: not sure if we want dynamic topology for
+					   masks or not */
+					SCULPT_TOOL_MASK)));
+}
 
 /*** paint mesh ***/
 
@@ -412,7 +440,7 @@ static void sculpt_brush_test_init(SculptSession *ss, SculptBrushTest *test)
 	test->dist = 0.0f;   /* just for initialize */
 }
 
-static int sculpt_brush_test(SculptBrushTest *test, float co[3])
+static int sculpt_brush_test(SculptBrushTest *test, const float co[3])
 {
 	float distsq = len_squared_v3v3(co, test->location);
 
@@ -425,7 +453,7 @@ static int sculpt_brush_test(SculptBrushTest *test, float co[3])
 	}
 }
 
-static int sculpt_brush_test_sq(SculptBrushTest *test, float co[3])
+static int sculpt_brush_test_sq(SculptBrushTest *test, const float co[3])
 {
 	float distsq = len_squared_v3v3(co, test->location);
 
@@ -742,7 +770,8 @@ static float brush_strength(Sculpt *sd, StrokeCache *cache, float feather)
 }
 
 /* Return a multiplier for brush strength on a particular vertex. */
-static float tex_strength(SculptSession *ss, Brush *br, float point[3],
+static float tex_strength(SculptSession *ss, Brush *br,
+						  const float point[3],
                           const float len,
                           const float sculpt_normal[3],
                           const short vno[3],
@@ -1736,6 +1765,57 @@ static void do_pinch_brush(Sculpt *sd, Object *ob, PBVHNode **nodes, int totnode
 	}
 }
 
+typedef struct {
+	SculptUndoNode *unode;
+	float (*coords)[3];
+	short (*normals)[3];
+	const BMLogEntry *log_entry;
+
+	/* Current coordinate/normal */
+	const float *co;
+	short no[3];
+} SculptOrigVertData;
+
+static void sculpt_orig_vert_data_init(SculptOrigVertData *data,
+									   Object *ob,
+									   PBVHNode *node)
+{
+	SculptSession *ss = ob->sculpt;
+	BMesh *bm = ss->bm;
+
+	memset(data, 0, sizeof(*data));
+
+	if (bm) {
+		const BMLogGroup *group = bm_log_group_current(bm->log);
+		data->log_entry = bm_log_group_last_entry(group);
+	}
+	else {
+		data->unode = sculpt_undo_push_node(ob, node, SCULPT_UNDO_COORDS);
+		data->coords = data->unode->co;
+		data->normals = data->unode->no;
+	}
+}
+
+static void sculpt_orig_vert_data_update(SculptOrigVertData *orig_data,
+										 PBVHVertexIter *iter)
+{
+	if (orig_data->coords) {
+		orig_data->co = orig_data->coords[iter->i];
+	}
+	else {
+		unsigned int vert_id = iter->bm_vert->head.id;
+		orig_data->co = bm_log_coords_get(orig_data->log_entry, vert_id);
+	}
+
+	if (orig_data->normals) {
+		copy_v3_v3_short(orig_data->no, orig_data->normals[iter->i]);
+	}
+	else {
+		/* TODO! log doesn't store normals yet */
+		normal_float_to_short_v3(orig_data->no, iter->bm_vert->no);
+	}
+}
+
 static void do_grab_brush(Sculpt *sd, Object *ob, PBVHNode **nodes, int totnode)
 {
 	SculptSession *ss = ob->sculpt;
@@ -1758,15 +1838,11 @@ static void do_grab_brush(Sculpt *sd, Object *ob, PBVHNode **nodes, int totnode)
 	#pragma omp parallel for schedule(guided) if (sd->flags & SCULPT_USE_OPENMP)
 	for (n = 0; n < totnode; n++) {
 		PBVHVertexIter vd;
-		SculptUndoNode *unode;
 		SculptBrushTest test;
-		float (*origco)[3];
-		short (*origno)[3];
+		SculptOrigVertData orig_data;
 		float (*proxy)[3];
 
-		unode =  sculpt_undo_push_node(ob, nodes[n], SCULPT_UNDO_COORDS);
-		origco = unode->co;
-		origno = unode->no;
+		sculpt_orig_vert_data_init(&orig_data, ob, nodes[n]);
 
 		proxy = BLI_pbvh_node_add_proxy(ss->pbvh, nodes[n])->co;
 
@@ -1774,9 +1850,15 @@ static void do_grab_brush(Sculpt *sd, Object *ob, PBVHNode **nodes, int totnode)
 
 		BLI_pbvh_vertex_iter_begin(ss->pbvh, nodes[n], vd, PBVH_ITER_UNIQUE)
 		{
-			if (sculpt_brush_test(&test, origco[vd.i])) {
-				const float fade = bstrength * tex_strength(ss, brush, origco[vd.i], test.dist,
-				                                            ss->cache->sculpt_normal_symm, origno[vd.i], NULL, *vd.mask);
+			sculpt_orig_vert_data_update(&orig_data, &vd);
+
+			if (sculpt_brush_test(&test, orig_data.co)) {
+				const float fade = bstrength * tex_strength(ss, brush,
+															orig_data.co,
+															test.dist,
+				                                            ss->cache->sculpt_normal_symm,
+															orig_data.no,
+															NULL, *vd.mask);
 
 				mul_v3_v3fl(proxy[vd.i], grab_delta, fade);
 
@@ -1895,15 +1977,11 @@ static void do_thumb_brush(Sculpt *sd, Object *ob, PBVHNode **nodes, int totnode
 	#pragma omp parallel for schedule(guided) if (sd->flags & SCULPT_USE_OPENMP)
 	for (n = 0; n < totnode; n++) {
 		PBVHVertexIter vd;
-		SculptUndoNode *unode;
 		SculptBrushTest test;
-		float (*origco)[3];
-		short (*origno)[3];
+		SculptOrigVertData orig_data;
 		float (*proxy)[3];
 
-		unode =  sculpt_undo_push_node(ob, nodes[n], SCULPT_UNDO_COORDS);
-		origco = unode->co;
-		origno = unode->no;
+		sculpt_orig_vert_data_init(&orig_data, ob, nodes[n]);
 
 		proxy = BLI_pbvh_node_add_proxy(ss->pbvh, nodes[n])->co;
 
@@ -1911,10 +1989,15 @@ static void do_thumb_brush(Sculpt *sd, Object *ob, PBVHNode **nodes, int totnode
 
 		BLI_pbvh_vertex_iter_begin(ss->pbvh, nodes[n], vd, PBVH_ITER_UNIQUE)
 		{
-			if (sculpt_brush_test(&test, origco[vd.i])) {
-				const float fade = bstrength * tex_strength(ss, brush, origco[vd.i], test.dist,
+			sculpt_orig_vert_data_update(&orig_data, &vd);
+
+			if (sculpt_brush_test(&test, orig_data.co)) {
+				const float fade = bstrength * tex_strength(ss, brush,
+															orig_data.co,
+															test.dist,
 				                                            ss->cache->sculpt_normal_symm,
-				                                            origno[vd.i], NULL, *vd.mask);
+				                                            orig_data.no,
+															NULL, *vd.mask);
 
 				mul_v3_v3fl(proxy[vd.i], cono, fade);
 
@@ -1948,15 +2031,11 @@ static void do_rotate_brush(Sculpt *sd, Object *ob, PBVHNode **nodes, int totnod
 	#pragma omp parallel for schedule(guided) if (sd->flags & SCULPT_USE_OPENMP)
 	for (n = 0; n < totnode; n++) {
 		PBVHVertexIter vd;
-		SculptUndoNode *unode;
 		SculptBrushTest test;
-		float (*origco)[3];
-		short (*origno)[3];
+		SculptOrigVertData orig_data;
 		float (*proxy)[3];
 
-		unode =  sculpt_undo_push_node(ob, nodes[n], SCULPT_UNDO_COORDS);
-		origco = unode->co;
-		origno = unode->no;
+		sculpt_orig_vert_data_init(&orig_data, ob, nodes[n]);
 
 		proxy = BLI_pbvh_node_add_proxy(ss->pbvh, nodes[n])->co;
 
@@ -1964,13 +2043,18 @@ static void do_rotate_brush(Sculpt *sd, Object *ob, PBVHNode **nodes, int totnod
 
 		BLI_pbvh_vertex_iter_begin(ss->pbvh, nodes[n], vd, PBVH_ITER_UNIQUE)
 		{
-			if (sculpt_brush_test(&test, origco[vd.i])) {
-				const float fade = bstrength * tex_strength(ss, brush, origco[vd.i], test.dist,
-				                                            ss->cache->sculpt_normal_symm,
-				                                            origno[vd.i], NULL, *vd.mask);
+			sculpt_orig_vert_data_update(&orig_data, &vd);
 
-				mul_v3_m4v3(proxy[vd.i], m, origco[vd.i]);
-				sub_v3_v3(proxy[vd.i], origco[vd.i]);
+			if (sculpt_brush_test(&test, orig_data.co)) {
+				const float fade = bstrength * tex_strength(ss, brush,
+				                                            orig_data.co,
+				                                            test.dist,
+				                                            ss->cache->sculpt_normal_symm,
+				                                            orig_data.no,
+		                                                    NULL, *vd.mask);
+
+				mul_v3_m4v3(proxy[vd.i], m, orig_data.co);
+				sub_v3_v3(proxy[vd.i], orig_data.co);
 				mul_v3_fl(proxy[vd.i], fade);
 
 				if (vd.mvert)
@@ -3045,7 +3129,11 @@ static void sculpt_combine_proxies(Sculpt *sd, Object *ob)
 	SculptSession *ss = ob->sculpt;
 	Brush *brush = paint_brush(&sd->paint);
 	PBVHNode **nodes;
+	const BMLogEntry *log_entry;
 	int totnode, n;
+
+	if (ss->bm)
+		log_entry = bm_log_group_last_entry(bm_log_group_current(ss->bm->log));
 
 	BLI_pbvh_gather_proxies(ss->pbvh, &nodes, &totnode);
 
@@ -3061,7 +3149,7 @@ static void sculpt_combine_proxies(Sculpt *sd, Object *ob)
 			int proxy_count;
 			float (*orco)[3];
 
-			if (use_orco)
+			if (use_orco && !ss->bm)
 				orco = sculpt_undo_push_node(ob, nodes[n], SCULPT_UNDO_COORDS)->co;
 
 			BLI_pbvh_node_get_proxies(nodes[n], &proxies, &proxy_count);
@@ -3071,8 +3159,16 @@ static void sculpt_combine_proxies(Sculpt *sd, Object *ob)
 				float val[3];
 				int p;
 
-				if (use_orco)
-					copy_v3_v3(val, orco[vd.i]);
+				/* XXX */
+				if (use_orco) {
+					if (ss->bm) {
+						copy_v3_v3(val,
+								   bm_log_coords_get(log_entry,
+													 vd.bm_vert->head.id));
+					}
+					else
+						copy_v3_v3(val, orco[vd.i]);
+				}
 				else
 					copy_v3_v3(val, vd.co);
 
@@ -4121,7 +4217,7 @@ static void sculpt_stroke_update_step(bContext *C, struct PaintStroke *stroke, P
 	Sculpt *sd = CTX_data_tool_settings(C)->sculpt;
 	Object *ob = CTX_data_active_object(C);
 	SculptSession *ss = ob->sculpt;
-	BrushSculptTool tool = paint_brush(&sd->paint)->sculpt_tool;
+	const Brush *brush = paint_brush(&sd->paint);
 	
 	sculpt_stroke_modifiers_check(C, ob);
 	sculpt_update_cache_variants(C, sd, ob, stroke, itemptr);
@@ -4135,10 +4231,7 @@ static void sculpt_stroke_update_step(bContext *C, struct PaintStroke *stroke, P
 	if (ss->bm)
 		;//ss->cache->original = 0;
 
-	if ((BLI_pbvh_type(ss->pbvh) == PBVH_BMESH) &&
-		(!ELEM(tool, SCULPT_TOOL_SMOOTH, SCULPT_TOOL_MASK)) &&
-		(!ss->cache->alt_smooth))
-	{
+	if (sculpt_stroke_dynamic_topology(ss, brush)) {
 		do_symmetrical_brush_actions(sd, ob, sculpt_topology_update);
 	}
 
