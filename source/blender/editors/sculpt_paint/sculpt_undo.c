@@ -319,9 +319,6 @@ static void sculpt_undo_restore(bContext *C, ListBase *lb,
 				continue;
 			}
 		}
-		else {
-			continue;
-		}
 
 		switch (unode->type) {
 			case SCULPT_UNDO_COORDS:
@@ -566,6 +563,9 @@ static SculptUndoNode *sculpt_undo_push_bmesh(Object *ob, PBVHNode *node)
 
 	if (!lb->first) {
 		unode = MEM_callocN(sizeof(*unode), AT);
+
+		BLI_strncpy(unode->idname, ob->id.name, sizeof(unode->idname));
+		unode->type = SCULPT_UNDO_COORDS;
 
 		/* Maybe not needed... (TODO) */
 		unode->bm_group = bm_log_group_current(ss->bm->log);
