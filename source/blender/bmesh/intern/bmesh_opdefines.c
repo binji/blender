@@ -1178,6 +1178,23 @@ static BMOpDefine bmo_convex_hull_def = {
 	0
 };
 
+/*
+ * Symmetrize
+ *
+ * Description is TODO
+ */
+static BMOpDefine bmo_symmetrize_def = {
+	"symmetrize",
+	{{BMO_OP_SLOT_ELEMENT_BUF, "input"},
+	 {BMO_OP_SLOT_INT, "direction"},
+
+	 /* Outputs */
+	 /* TODO */
+	 {0} /* null-terminating sentinel */},
+	bmo_symmetrize_exec,
+	0
+};
+
 BMOpDefine *opdefines[] = {
 	&bmo_automerge_def,
 	&bmo_average_vert_facedata_def,
@@ -1242,6 +1259,7 @@ BMOpDefine *opdefines[] = {
 	&bmo_split_def,
 	&bmo_split_edges_def,
 	&bmo_subdivide_edges_def,
+	&bmo_symmetrize_def,
 	&bmo_transform_def,
 	&bmo_translate_def,
 	&bmo_triangle_fill_def,
