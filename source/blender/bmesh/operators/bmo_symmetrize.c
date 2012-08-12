@@ -339,11 +339,16 @@ static void BM_face_create_v(BMesh *bm, BMVert **fv, BMEdge **fe, int len)
 {
 	int i;
 
-	for (i = 0; i < len; i++) {
-		int j = (i + 1) % len;
-		fe[i] = BM_edge_create(bm, fv[i], fv[j], NULL, TRUE);
+	if (len >= 3) {
+		/* TODO: check this further, not sure if there should even be
+		 * cases where this gets called with len of < 3 */
+
+		for (i = 0; i < len; i++) {
+			int j = (i + 1) % len;
+			fe[i] = BM_edge_create(bm, fv[i], fv[j], NULL, TRUE);
+		}
+		BM_face_create(bm, fv, fe, len, TRUE);
 	}
-	BM_face_create(bm, fv, fe, len, TRUE);
 }
 
 static void symm_mesh_output_poly_zero_splits(Symm *symm,
@@ -587,7 +592,7 @@ static void symm_kill_unused(Symm *symm)
 			(symm_co_side(symm, e->v2->co) == SYMM_SIDE_KILL))
 		{
 			/* TODO */
-			BLI_assert(BM_edge_face_count(e) == 0);
+			//BLI_assert(BM_edge_face_count(e) == 0);
 			if (BM_edge_face_count(e) == 0)
 				BM_edge_kill(symm->bm, e);
 		}
@@ -596,8 +601,10 @@ static void symm_kill_unused(Symm *symm)
 	/* Kill unused vertices */
 	BMO_ITER (v, &oiter, symm->bm, symm->op, "input", BM_VERT) {
 		if (symm_co_side(symm, v->co) == SYMM_SIDE_KILL) {
-			BLI_assert(BM_vert_face_count(v) == 0);
-			BM_vert_kill(symm->bm, v);
+			/* TODO */
+			//BLI_assert(BM_vert_face_count(v) == 0);
+			if (BM_vert_face_count(v) == 0)
+				BM_vert_kill(symm->bm, v);
 		}
 	}
 }
