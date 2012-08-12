@@ -877,6 +877,9 @@ class VIEW3D_PT_sculpt_options(Panel, View3DPaintPanel):
         col.prop(sculpt, "detail_size")
         col.prop(sculpt, "use_smooth_shading")
         col.prop(sculpt, "use_edge_collapse")
+        col.separator()
+        col.prop(sculpt, "symmetrize_direction")
+        col.operator("sculpt.symmetrize")
         col.active = context.sculpt_object.use_dynamic_topology_sculpting
 
         layout.label(text="Lock:")

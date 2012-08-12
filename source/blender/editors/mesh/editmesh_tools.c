@@ -40,6 +40,7 @@
 
 #include "RNA_define.h"
 #include "RNA_access.h"
+#include "RNA_enum_types.h"
 
 #include "BLI_array.h"
 #include "BLI_blenlib.h"
@@ -5401,18 +5402,6 @@ static int mesh_symmetrize_exec(bContext *C, wmOperator *op)
 
 void MESH_OT_symmetrize(struct wmOperatorType *ot)
 {
-	static EnumPropertyItem direction_items[] = {
-		{BMO_SYMMETRIZE_NEGATIVE_X, "NEGATIVE_X", 0, "-X to +X", ""},
-		{BMO_SYMMETRIZE_POSITIVE_X, "POSITIVE_X", 0, "+X to -X", ""},
-
-		{BMO_SYMMETRIZE_NEGATIVE_Y, "NEGATIVE_Y", 0, "-Y to +Y", ""},
-		{BMO_SYMMETRIZE_POSITIVE_Y, "POSITIVE_Y", 0, "+Y to -Y", ""},
-
-		{BMO_SYMMETRIZE_NEGATIVE_Z, "NEGATIVE_Z", 0, "-Z to +Z", ""},
-		{BMO_SYMMETRIZE_POSITIVE_Z, "POSITIVE_Z", 0, "+Z to -Z", ""},
-		{0, NULL, 0, NULL, NULL},
-	};
-
 	/* identifiers */
 	ot->name = "Symmetrize";
 	ot->description = "Enforce symmetry (both form and topological) across an axis";
@@ -5425,6 +5414,6 @@ void MESH_OT_symmetrize(struct wmOperatorType *ot)
 	/* flags */
 	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 
-	ot->prop = RNA_def_enum(ot->srna, "direction", direction_items, 0,
+	ot->prop = RNA_def_enum(ot->srna, "direction", symmetrize_direction_items, 0,
 							"Direction", "Which sides to copy from and to");
 }

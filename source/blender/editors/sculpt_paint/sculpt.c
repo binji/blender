@@ -4521,6 +4521,57 @@ static void SCULPT_OT_dynamic_topology_toggle(wmOperatorType *ot)
 	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
+/********************* Dynamic topology symmetrize ********************/
+
+static int sculpt_symmetrize_exec(bContext *C, wmOperator *UNUSED(op))
+{
+	Object *ob = CTX_data_active_object(C);
+	const Sculpt *sd = CTX_data_tool_settings(C)->sculpt;
+	SculptSession *ss = ob->sculpt;
+	DerivedMesh *dm = ob->derivedFinal;
+
+	/* TODO, duped from undo */
+	/* Force PBVH refresh */
+	if (ss->pbvh)
+		BLI_pbvh_free(ss->pbvh);
+	if (dm)
+		dm->getPBVH(NULL, dm);
+	ss->pbvh = NULL;
+
+	bm_log_group_create(ss->bm->log, "Symmetrize");
+
+	BMO_op_callf(ss->bm, BMO_FLAG_DEFAULTS,
+				 "symmetrize input=%avef direction=%i",
+				 sd->symmetrize_direction);
+	/* TODO, duplicated from above */
+	BMO_op_callf(ss->bm, BMO_FLAG_DEFAULTS, "triangulate faces=%af");
+
+	ss->pbvh = dm->getPBVH(ob, dm);
+
+	DAG_id_tag_update(&ob->id, OB_RECALC_DATA);
+	WM_event_add_notifier(C, NC_OBJECT | ND_DRAW, ob);
+
+	return OPERATOR_FINISHED;
+}
+
+static int sculpt_symmetrize_poll(bContext *C)
+{
+	Object *ob = CTX_data_active_object(C);
+
+	return sculpt_mode_poll(C) && ob->sculpt->bm;
+}
+
+static void SCULPT_OT_symmetrize(wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Symmetrize";
+	ot->idname = "SCULPT_OT_symmetrize";
+	
+	/* api callbacks */
+	ot->exec = sculpt_symmetrize_exec;
+	ot->poll = sculpt_symmetrize_poll;
+}
+
 /**** Toggle operator for turning sculpt mode on or off ****/
 
 static void sculpt_init_session(Scene *scene, Object *ob)
@@ -4677,4 +4728,5 @@ void ED_operatortypes_sculpt(void)
 	WM_operatortype_append(SCULPT_OT_sculptmode_toggle);
 	WM_operatortype_append(SCULPT_OT_set_persistent_base);
 	WM_operatortype_append(SCULPT_OT_dynamic_topology_toggle);
+	WM_operatortype_append(SCULPT_OT_symmetrize);
 }
