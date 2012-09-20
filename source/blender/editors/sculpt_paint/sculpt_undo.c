@@ -267,9 +267,9 @@ static void sculpt_undo_bmesh_restore(Object *ob, SculptSession *ss,
 	DerivedMesh *dm = ob->derivedFinal;
 
 	if (direction == PAINT_RESTORE_UNDO)
-		bm_undo(ss->bm);
+		;//bm_undo(ss->bm);
 	else
-		bm_redo(ss->bm);
+		;//bm_redo(ss->bm);
 
 	/* A bit lame, but for now just recreate the PBVH. The alternative
 	 * is to store changes to the PBVH in the undo stack. */
@@ -568,14 +568,14 @@ static SculptUndoNode *sculpt_undo_push_bmesh(Object *ob, PBVHNode *node)
 		unode->type = SCULPT_UNDO_COORDS;
 
 		/* Maybe not needed... (TODO) */
-		unode->bm_group = bm_log_group_current(ss->bm->log);
+		;//unode->bm_group = bm_log_group_current(ss->bm->log);
 
 		BLI_addtail(lb, unode);
 	}
 
 	BLI_pbvh_vertex_iter_begin(ss->pbvh, node, vd, PBVH_ITER_ALL)
 	{
-		bm_log_coord_set(ss->bm, vd.bm_vert);
+		;//bm_log_coord_set(ss->bm, vd.bm_vert);
 	}
 	BLI_pbvh_vertex_iter_end;
 

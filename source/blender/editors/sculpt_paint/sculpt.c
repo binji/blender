@@ -1769,7 +1769,7 @@ typedef struct {
 	SculptUndoNode *unode;
 	float (*coords)[3];
 	short (*normals)[3];
-	const BMLogEntry *log_entry;
+	//const BMLogEntry *log_entry;
 
 	/* Current coordinate/normal */
 	const float *co;
@@ -1786,8 +1786,8 @@ static void sculpt_orig_vert_data_init(SculptOrigVertData *data,
 	memset(data, 0, sizeof(*data));
 
 	if (bm) {
-		const BMLogGroup *group = bm_log_group_current(bm->log);
-		data->log_entry = bm_log_group_last_entry(group);
+		;//const BMLogGroup *group = bm_log_group_current(bm->log);
+		;//data->log_entry = bm_log_group_last_entry(group);
 	}
 	else {
 		data->unode = sculpt_undo_push_node(ob, node, SCULPT_UNDO_COORDS);
@@ -1803,8 +1803,8 @@ static void sculpt_orig_vert_data_update(SculptOrigVertData *orig_data,
 		orig_data->co = orig_data->coords[iter->i];
 	}
 	else {
-		unsigned int vert_id = iter->bm_vert->head.id;
-		orig_data->co = bm_log_coords_get(orig_data->log_entry, vert_id);
+		;//unsigned int vert_id = iter->bm_vert->head.id;
+		;//orig_data->co = bm_log_coords_get(orig_data->log_entry, vert_id);
 	}
 
 	if (orig_data->normals) {
@@ -3129,11 +3129,11 @@ static void sculpt_combine_proxies(Sculpt *sd, Object *ob)
 	SculptSession *ss = ob->sculpt;
 	Brush *brush = paint_brush(&sd->paint);
 	PBVHNode **nodes;
-	const BMLogEntry *log_entry;
+	//const BMLogEntry *log_entry;
 	int totnode, n;
 
 	if (ss->bm)
-		log_entry = bm_log_group_last_entry(bm_log_group_current(ss->bm->log));
+		;//log_entry = bm_log_group_last_entry(bm_log_group_current(ss->bm->log));
 
 	BLI_pbvh_gather_proxies(ss->pbvh, &nodes, &totnode);
 
@@ -3162,9 +3162,9 @@ static void sculpt_combine_proxies(Sculpt *sd, Object *ob)
 				/* XXX */
 				if (use_orco) {
 					if (ss->bm) {
-						copy_v3_v3(val,
+		/*copy_v3_v3(val,
 								   bm_log_coords_get(log_entry,
-													 vd.bm_vert->head.id));
+								   vd.bm_vert->head.id));*/
 					}
 					else
 						copy_v3_v3(val, orco[vd.i]);
@@ -4203,7 +4203,7 @@ static int sculpt_stroke_test_start(bContext *C, struct wmOperator *op,
 		sculpt_undo_push_begin(sculpt_tool_name(sd));
 		if (ss->bm) {
 			/* TODO */
-			bm_log_group_create(ss->bm->log, sculpt_tool_name(sd));
+			;//bm_log_group_create(ss->bm->log, sculpt_tool_name(sd));
 		}
 
 		return 1;
@@ -4538,7 +4538,7 @@ static int sculpt_symmetrize_exec(bContext *C, wmOperator *UNUSED(op))
 		dm->getPBVH(NULL, dm);
 	ss->pbvh = NULL;
 
-	bm_log_group_create(ss->bm->log, "Symmetrize");
+	//bm_log_group_create(ss->bm->log, "Symmetrize");
 
 	BMO_op_callf(ss->bm, BMO_FLAG_DEFAULTS,
 				 "symmetrize input=%avef direction=%i",

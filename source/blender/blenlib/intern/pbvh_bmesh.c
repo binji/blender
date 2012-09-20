@@ -1395,8 +1395,7 @@ static void pbvh_bmesh_collapse_edge(PBVH *bvh, BMEdge *e,
 
 	/* Move v1 to the midpoint of v1 and v2 */
 	/* TODO: skip for boundary verts? */
-	mid_v3_v3v3(mid, v1->co, v2->co);
-	BM_vert_copy_v3(bvh->bm, v1, mid);
+	mid_v3_v3v3(v1->co, v1->co, v2->co);
 
 	/* Delete v2 */
 	BLI_assert(BM_vert_face_count(v2) == 0);

@@ -40,6 +40,7 @@
 #include "WM_api.h"
 #include "WM_types.h"
 
+#include "BLI_utildefines.h"
 #include "bmesh.h"
 
 static EnumPropertyItem particle_edit_hair_brush_items[] = {
