@@ -45,6 +45,7 @@ struct PBVHNode;
 
 typedef struct PBVH PBVH;
 typedef struct PBVHNode PBVHNode;
+typedef struct PBVHBMeshLog PBVHBMeshLog;
 
 typedef struct {
 	float (*co)[3];
@@ -186,6 +187,24 @@ float (*BLI_pbvh_get_vertCos(struct PBVH *pbvh))[3];
 void BLI_pbvh_apply_vertCos(struct PBVH *pbvh, float (*vertCos)[3]);
 int BLI_pbvh_isDeformed(struct PBVH *pbvh);
 
+/* undo log */
+
+/* Allocate, initialize, and assign a new PBVHBMeshLog */
+void BLI_pbvh_bmesh_log_create(PBVH *bvh);
+
+/* Free all the data in a PBVHBMeshLog including the log itself */
+void BLI_pbvh_bmesh_log_free(PBVHBMeshLog *log);
+
+/* Get the PBVH's PBVHBMeshLog */
+PBVHBMeshLog *BLI_pbvh_bmesh_log_get(PBVH *pbvh);
+
+/* Set the PBVH's PBVHBMeshLog */
+void BLI_pbvh_bmesh_log_set(PBVH *pbvh, PBVHBMeshLog *log);
+
+void BLI_pbvh_bmesh_log_entry_add(PBVH *pbvh);
+void BLI_pbvh_bmesh_log_undo(PBVH *pbvh);
+void BLI_pbvh_bmesh_log_redo(PBVH *pbvh);
+void BLI_pbvh_bmesh_log_vert_moved(PBVH *bvh, BMVert *v);
 
 /* Vertex Iterator */
 

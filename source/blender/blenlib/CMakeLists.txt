@@ -32,6 +32,7 @@ set(INC
 	../makesdna
 	../../../intern/ghost
 	../../../intern/guardedalloc
+	../../../intern/rangetree
 )
 
 set(INC_SYS
@@ -80,6 +81,7 @@ set(SRC
 	intern/path_util.c
 	intern/pbvh.c
 	intern/pbvh_bmesh.c
+	intern/pbvh_log.c
 	intern/rand.c
 	intern/rct.c
 	intern/scanfill.c

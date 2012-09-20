@@ -105,6 +105,8 @@ typedef enum {
 	PBVH_DYNTOPO_SMOOTH_SHADING = 1
 } PBVHFlags;
 
+typedef struct PBVHBMeshLog PBVHBMeshLog;
+
 struct PBVH {
 	PBVHType type;
 	PBVHFlags flags;
@@ -143,12 +145,15 @@ struct PBVH {
 	/* flag are verts/faces deformed */
 	int deformed;
 
-	/* Dynamic topology */
+	/** Dynamic topology **/
+
 	BMesh *bm;
 	GHash *bm_face_to_node;
 	GHash *bm_vert_to_node;
 	float bm_max_edge_len;
 	float bm_min_edge_len;
+
+	PBVHBMeshLog *bm_log;
 };
 
 /* pbvh.c */
@@ -177,3 +182,13 @@ int pbvh_bmesh_node_raycast(PBVHNode *node,
 							int use_original);
 
 void pbvh_bmesh_normals_update(PBVHNode **nodes, int totnode);
+
+/* pbvh_log.c */
+typedef struct PBVHBMeshLogEntry PBVHBMeshLogEntry;
+typedef struct PBVHBMeshLogVert PBVHBMeshLogVert;
+typedef struct PBVHBMeshLogFace PBVHBMeshLogFace;
+
+void pbvh_bmesh_log_vert_added(PBVH *bvh, BMVert *v);
+void pbvh_bmesh_log_face_added(PBVH *bvh, BMFace *f);
+void pbvh_bmesh_log_vert_removed(PBVH *bvh, BMVert *v);
+void pbvh_bmesh_log_face_removed(PBVH *bvh, BMFace *f);

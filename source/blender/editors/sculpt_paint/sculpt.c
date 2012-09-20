@@ -4498,7 +4498,7 @@ static int sculpt_dynamic_topology_toggle_exec(bContext *C, wmOperator *UNUSED(o
 		BM_mesh_normals_update(ss->bm, TRUE);
 
 		/* Enable logging for undo/redo */
-		BM_mesh_enable_logging(ss->bm);
+		//BM_mesh_enable_logging(ss->bm);
 	}
 
 	sculpt_update_mesh_elements(scene, sd, ob, FALSE);

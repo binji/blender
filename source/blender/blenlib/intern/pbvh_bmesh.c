@@ -34,8 +34,10 @@
 
 #include "GPU_buffers.h"
 
-#include "pbvh_intern.h"
 #include "bmesh.h"
+#include "pbvh_intern.h"
+
+#include <assert.h>
 
 static void pbvh_bmesh_node_finalize(PBVH *bvh, int node_index)
 {
@@ -267,6 +269,9 @@ void BLI_pbvh_build_bmesh(PBVH *bvh, BMesh *bm, int smooth_shading)
 
 	/* TODO: choose leaf limit better */
 	bvh->leaf_limit = 100;
+
+	/* Initialize logging */
+	//pbvh_bmesh_logging_init(bvh);
 
 	if (smooth_shading)
 		bvh->flags |= PBVH_DYNTOPO_SMOOTH_SHADING;
@@ -543,6 +548,8 @@ void pbvh_bmesh_verify(PBVH *bvh)
 	}
 }
 
+/**********************************************************************/
+
 /* XXX: remove these */
 #include "intern/bmesh_private.h"
 #include "intern/bmesh_mesh_validate.h"
@@ -559,8 +566,13 @@ static BMVert *pbvh_bmesh_vert_create(PBVH *bvh, int node_index,
 	BLI_ghash_insert(bvh->nodes[node_index].bm_unique_verts, v, NULL);
 	BLI_ghash_insert(bvh->bm_vert_to_node, v, val);
 
+	/* Log the new vertex */
+	pbvh_bmesh_log_vert_added(bvh, v);
+
 	return v;
 }
+
+/**********************************************************************/
 
 static BMFace *pbvh_bmesh_face_create(PBVH *bvh, int node_index,
 									  BMVert *v1, BMVert *v2, BMVert *v3,
@@ -580,6 +592,7 @@ static BMFace *pbvh_bmesh_face_create(PBVH *bvh, int node_index,
 	   performance bump */
 	f = BM_face_create_quad_tri(bvh->bm, v1, v2, v3, NULL, NULL, TRUE);
 	if (!BLI_ghash_haskey(bvh->bm_face_to_node, f)) {
+
 		BLI_ghash_insert(bvh->nodes[node_index].bm_faces, f, NULL);
 		BLI_ghash_insert(bvh->bm_face_to_node, f, val);
 
@@ -587,6 +600,9 @@ static BMFace *pbvh_bmesh_face_create(PBVH *bvh, int node_index,
 		/*BM_ITER_ELEM (v, &bm_iter, f, BM_VERTS_OF_FACE) {
 			BM_vert_normal_update_all(v);
 			}*/
+
+		/* Log the new face */
+		pbvh_bmesh_log_face_added(bvh, f);
 	}
 
 	return f;
@@ -716,6 +732,9 @@ static void pbvh_bmesh_face_remove(PBVH *bvh, BMFace *f)
 	/* Remove face from node and top level */
 	BLI_ghash_remove(f_node->bm_faces, f, NULL, NULL);
 	BLI_ghash_remove(bvh->bm_face_to_node, f, NULL, NULL);
+
+	/* Log removed face */
+	pbvh_bmesh_log_face_removed(bvh, f);
 }
 
 static BMVert *bm_triangle_other_vert_find(BMFace *triangle,
@@ -1388,18 +1407,22 @@ static void pbvh_bmesh_collapse_edge(PBVH *bvh, BMEdge *e,
 
 		/* Delete unused vertices */
 		for (j = 0; j < 3; j++) {
-			if (v[j])
+			if (v[j]) {
+				pbvh_bmesh_log_vert_removed(bvh, v[j]);
 				BM_vert_kill(bvh->bm, v[j]);
+			}
 		}
 	}
 
 	/* Move v1 to the midpoint of v1 and v2 */
 	/* TODO: skip for boundary verts? */
+	BLI_pbvh_bmesh_log_vert_moved(bvh, v1);
 	mid_v3_v3v3(v1->co, v1->co, v2->co);
 
 	/* Delete v2 */
 	BLI_assert(BM_vert_face_count(v2) == 0);
 	BLI_ghash_insert(deleted_verts, v2, NULL);
+	pbvh_bmesh_log_vert_removed(bvh, v2);
 	BM_vert_kill(bvh->bm, v2);
 }
 
@@ -1843,4 +1866,3 @@ void BLI_pbvh_node_mark_topology_update(PBVHNode *node)
 {
 	node->flag |= PBVH_UpdateTopology;
 }
-
