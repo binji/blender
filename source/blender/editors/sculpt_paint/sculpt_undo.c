@@ -265,11 +265,19 @@ static void sculpt_undo_bmesh_restore(Object *ob, SculptSession *ss,
 									  PaintRestoreDirection direction)
 {
 	DerivedMesh *dm = ob->derivedFinal;
+	struct PBVHBMeshLog *log;
+
+	/* Hang on to the log so that when the PBVH is re-created, the log
+	   remains valid. */
+	/* TODO: saving of the log should maybe be done in other places
+	   too, such that exiting and reentering sculpt mode doesn't kill
+	   the undo stack? */
+	log = BLI_pbvh_bmesh_log_get(ss->pbvh);
 
 	if (direction == PAINT_RESTORE_UNDO)
-		;//bm_undo(ss->bm);
+		BLI_pbvh_bmesh_log_undo(ss->pbvh);
 	else
-		;//bm_redo(ss->bm);
+		BLI_pbvh_bmesh_log_redo(ss->pbvh);
 
 	/* A bit lame, but for now just recreate the PBVH. The alternative
 	 * is to store changes to the PBVH in the undo stack. */
@@ -280,6 +288,7 @@ static void sculpt_undo_bmesh_restore(Object *ob, SculptSession *ss,
 	ss->pbvh = NULL;
 
 	ss->pbvh = dm->getPBVH(ob, dm);
+	BLI_pbvh_bmesh_log_set(ss->pbvh, log);
 }
 
 static void sculpt_undo_restore(bContext *C, ListBase *lb,
@@ -568,6 +577,7 @@ static SculptUndoNode *sculpt_undo_push_bmesh(Object *ob, PBVHNode *node)
 		unode->type = SCULPT_UNDO_COORDS;
 
 		/* Maybe not needed... (TODO) */
+		//BLI_pbvh_bmesh_entry_finalize(ss->pbvh);
 		;//unode->bm_group = bm_log_group_current(ss->bm->log);
 
 		BLI_addtail(lb, unode);
@@ -575,7 +585,8 @@ static SculptUndoNode *sculpt_undo_push_bmesh(Object *ob, PBVHNode *node)
 
 	BLI_pbvh_vertex_iter_begin(ss->pbvh, node, vd, PBVH_ITER_ALL)
 	{
-		;//bm_log_coord_set(ss->bm, vd.bm_vert);
+		BLI_pbvh_bmesh_log_vert_moved(ss->pbvh, vd.bm_vert);
+		//bm_log_coord_set(ss->bm, vd.bm_vert);
 	}
 	BLI_pbvh_vertex_iter_end;
 

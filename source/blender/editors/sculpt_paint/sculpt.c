@@ -4203,7 +4203,8 @@ static int sculpt_stroke_test_start(bContext *C, struct wmOperator *op,
 		sculpt_undo_push_begin(sculpt_tool_name(sd));
 		if (ss->bm) {
 			/* TODO */
-			;//bm_log_group_create(ss->bm->log, sculpt_tool_name(sd));
+			BLI_pbvh_bmesh_log_entry_add(ss->pbvh);
+			//bm_log_group_create(ss->bm->log, sculpt_tool_name(sd));
 		}
 
 		return 1;
@@ -4497,12 +4498,16 @@ static int sculpt_dynamic_topology_toggle_exec(bContext *C, wmOperator *UNUSED(o
 							 NULL, ss->bm->totvert);
 		BM_mesh_normals_update(ss->bm, TRUE);
 
-		/* Enable logging for undo/redo */
 		//BM_mesh_enable_logging(ss->bm);
 	}
 
 	sculpt_update_mesh_elements(scene, sd, ob, FALSE);
 	WM_event_add_notifier(C, NC_OBJECT | ND_MODIFIER, ob);
+
+	/* Enable logging for undo/redo */
+	// TODO: save in the session? */
+	if (ss->bm)
+		BLI_pbvh_bmesh_log_create(ss->pbvh);
 
 	return OPERATOR_FINISHED;
 }
@@ -4558,7 +4563,8 @@ static int sculpt_symmetrize_poll(bContext *C)
 {
 	Object *ob = CTX_data_active_object(C);
 
-	return sculpt_mode_poll(C) && ob->sculpt->bm;
+	return FALSE; // XXX
+	//return sculpt_mode_poll(C) && ob->sculpt->bm;
 }
 
 static void SCULPT_OT_symmetrize(wmOperatorType *ot)

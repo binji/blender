@@ -274,8 +274,14 @@ void free_sculptsession(Object *ob)
 			BM_mesh_free(ss->bm);
 		}
 
-		if (ss->pbvh)
+		if (ss->pbvh) {
+			PBVHBMeshLog *log;
 			BLI_pbvh_free(ss->pbvh);
+			// TODO: might move ownership to the sculpt-session proper
+			log = BLI_pbvh_bmesh_log_get(ss->pbvh);
+			if (log)
+				BLI_pbvh_bmesh_log_free(log);
+		}
 		if (dm && dm->getPBVH)
 			dm->getPBVH(NULL, dm);  /* signal to clear */
 

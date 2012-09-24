@@ -150,6 +150,10 @@ static void pbvh_bmesh_log_assign_ids(PBVH *bvh)
 	BMesh *bm = bvh->bm;
 	BMIter iter;
 
+	// TODO:
+	BM_data_layer_free(bvh->bm, &bm->vdata, CD_ELEM_IDS);
+	BM_data_layer_free(bvh->bm, &bm->pdata, CD_ELEM_IDS);
+
 	/* Generate vertex IDs */
 	if (!CustomData_has_layer(&bm->vdata, CD_ELEM_IDS)) {
 		BMVert *v;
